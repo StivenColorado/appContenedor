@@ -1,0 +1,27 @@
+# En Windows
+python -m venv venv
+venv\Scripts\activate
+
+# En Mac/Linux
+python3 -m venv venv
+source venv/bin/activate
+
+#instalar librerias
+pip install pandas numpy openpyxl tkinter
+
+# Asegúrate de que el entorno virtual está activado
+python excel_processor.py
+
+
+Crear el ejecutable
+Para crear un ejecutable que puedas distribuir:
+
+# Instalar PyInstaller
+pip install pyinstaller
+
+# Crear el ejecutable
+# En Windows:
+pyinstaller --onefile --windowed excel_processor.py
+
+# En Mac:
+pyinstaller --onefile --windowed excel_processor.py
