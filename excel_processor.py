@@ -243,6 +243,7 @@ def process_brand_excel(brand_df, input_path, header_end_row, output_path, marca
         total_row = len(brand_df) + 2
         worksheet.cell(row=total_row, column=1, value='TOTAL')
         
+        totals = {}
         for display_name, col_name in total_columns.items():
             if col_name in brand_df.columns:
                 col_index = list(brand_df.columns).index(col_name) + 1
@@ -251,6 +252,12 @@ def process_brand_excel(brand_df, input_path, header_end_row, output_path, marca
                 worksheet.cell(row=total_row, column=col_index + 1, value=formula)
                 worksheet.cell(row=total_row, column=col_index + 1).font = Font(bold=True)
                 worksheet.cell(row=total_row, column=col_index + 1).alignment = Alignment(horizontal='right')
+                totals[col_name] = brand_df[col_name].sum()
+        
+        # Print totals to console
+        print(f"File: {filename}")
+        for col_name, total in totals.items():
+            print(f"{col_name}: {total}")
 
         # Clear other cells in the total row
         for col in range(2, len(brand_df.columns) + 1):
