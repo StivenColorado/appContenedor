@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd
@@ -9,25 +10,28 @@ from openpyxl.drawing.image import Image
 from datetime import datetime
 import io
 from PIL import Image as PILImage
-import logging
-
-# Configure logging
+import openpyxl
 
 class ExcelProcessorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Procesador de Excel")
-        self.root.geometry("600x400")
+        self.root.geometry("600x450")
+        # Agregar icono a la ventana
+        try:
+            self.root.iconbitmap('icon.ico')  # Asegúrate de tener el archivo icon.ico en el mismo directorio
+        except:
+            pass
         
-        # Configurar el estilo
-        style = ttk.Style()
-        style.configure('Custom.TFrame', background='#f0f0f0')
-        
+        # Configurar el estilo correctamente
+        style = ttk.Style(root)
+        style.configure('TFrame', background='#f0f0f0')  # Usa 'TFrame' directamente para verificar si el problema persiste
+
         # Frame principal
         self.main_frame = ttk.Frame(root, padding="20", style='Custom.TFrame')
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Etiqueta de título
+        # Etiqueta de titulo
         self.title_label = ttk.Label(
             self.main_frame,
             text="Procesador de Excel",
@@ -35,9 +39,28 @@ class ExcelProcessorApp:
         )
         self.title_label.pack(pady=20)
         
-        # Frame para los archivos
+        # Frame para los archivos y numero de consolidado
         self.file_frame = ttk.Frame(self.main_frame)
         self.file_frame.pack(fill=tk.X, pady=20)
+        
+        # Numero de consolidado
+        self.consolidado_frame = ttk.Frame(self.file_frame)
+        self.consolidado_frame.pack(fill=tk.X, pady=5)
+        
+        self.consolidado_label = ttk.Label(
+            self.consolidado_frame,
+            text="Numero de Consolidado:",
+            font=('Helvetica', 10)
+        )
+        self.consolidado_label.pack(side=tk.LEFT)
+        
+        self.consolidado_var = tk.StringVar()
+        self.consolidado_entry = ttk.Entry(
+            self.consolidado_frame,
+            textvariable=self.consolidado_var,
+            width=10
+        )
+        self.consolidado_entry.pack(side=tk.LEFT, padx=5)
         
         # Input file
         self.input_path = tk.StringVar()
@@ -91,7 +114,7 @@ class ExcelProcessorApp:
         )
         self.output_button.pack(side=tk.RIGHT)
         
-        # Botón de procesar
+        # Boton de procesar
         self.process_button = ttk.Button(
             self.main_frame,
             text="Procesar Excel",
@@ -132,10 +155,19 @@ class ExcelProcessorApp:
             self.output_path.set(directory)
 
     def process_file(self):
-        if not self.input_path.get() or not self.output_path.get():
+        if not self.input_path.get() or not self.output_path.get() or not self.consolidado_var.get():
             messagebox.showerror(
                 "Error",
-                "Por favor seleccione el archivo de entrada y la carpeta de salida"
+                "Por favor complete todos los campos requeridos"
+            )
+            return
+        
+        try:
+            consolidado = int(self.consolidado_var.get())
+        except ValueError:
+            messagebox.showerror(
+                "Error",
+                "El numero de consolidado debe ser un numero valido"
             )
             return
         
@@ -143,16 +175,15 @@ class ExcelProcessorApp:
         self.status_label.config(text="Procesando archivo...")
         self.process_button.state(['disabled'])
         
-        self.root.after(100, self.run_processing)
+        self.root.after(100, lambda: self.run_processing(consolidado))
 
-    def run_processing(self):
+    def run_processing(self, consolidado):
         try:
-            consolidado = "CONSOLIDADO"  # Define the consolidado value
             process_excel(self.input_path.get(), self.output_path.get(), consolidado)
             self.progress.stop()
             self.status_label.config(text="¡Archivos procesados correctamente!")
             messagebox.showinfo(
-                "Éxito",
+                "Exito",
                 "Los archivos han sido procesados correctamente"
             )
         except Exception as e:
@@ -163,30 +194,24 @@ class ExcelProcessorApp:
             self.process_button.state(['!disabled'])
             self.progress.stop()
 
-def clean_numeric_value(value):
-    if pd.isna(value):
-        return 0
-    value = str(value).replace('¥', '').replace(' ', '')
-    value = value.replace('.', '').replace(',', '.')
+def get_header_rows(input_path):
+    """Obtiene las primeras 7 filas del archivo original"""
     try:
-        return float(value)
-    except:
-        return 0
+        header_df = pd.read_excel(input_path, nrows=7, header=None)
+        return header_df
+    except Exception as e:
+        print(f"Error al leer las filas de encabezado: {str(e)}")
+        return None
 
-def find_header_row(df):
+def find_header_row(df, start_row=7):
+    """Busca la fila de encabezados después de las 7 primeras filas"""
     keywords = ['CTNS', 'MARCA', 'CBM', 'WEIGHT', 'PRODUCTO', 'PRODUCT PICTURE']
-    for idx, row in df.iterrows():
+    for idx, row in df.iloc[start_row:].iterrows():
         row_str = ' '.join(str(val).upper().strip() for val in row)
         matches = sum(keyword in row_str for keyword in keywords)
-        if matches >= 3:  # Aumentamos el número mínimo de coincidencias
+        if matches >= 3:
             return idx
     return None
-
-def find_column(columns, keyword):
-    matches = [col for col in columns if keyword in col.upper()]
-    if matches:
-        return matches[0]
-    raise ValueError(f"Columna requerida no encontrada: {keyword}")
 
 def get_color_by_brand(brand):
     predefined_colors = {
@@ -196,6 +221,52 @@ def get_color_by_brand(brand):
         'DEFAULT': 'FFFFFF'
     }
     return predefined_colors.get(brand.upper(), predefined_colors['DEFAULT'])
+
+def find_real_header_row(df):
+    """
+    Busca la fila que contiene los encabezados específicos mencionados
+    """
+    header_keywords = [
+        'ESPECIAL O NORMAL',
+        'FECHA DE ENTREGA',
+        'SHIPPER',
+        'SHIPPING MARK',
+        'PRODUCT PICTURE',
+        'MARCA',
+        '品牌',  # Agregamos el término en chino
+        'PRODUCT DESCRIPTION',
+        'CTNS',
+        'QTY/CTN'
+    ]
+    
+    for idx, row in df.iterrows():
+        row_str = ' '.join(str(val).upper().strip() for val in row if pd.notna(val))
+        matches = sum(keyword in row_str.upper() for keyword in header_keywords)
+        if matches >= 4:  # Reducimos el número de coincidencias necesarias
+            return idx
+    return None
+
+def copy_workbook_structure(input_path, header_end_row):
+    """
+    Copia la estructura exacta del archivo original, incluyendo imágenes y formato
+    """
+    src_wb = openpyxl.load_workbook(input_path)
+    src_ws = src_wb.active
+    
+    # Guardar información de imágenes y sus posiciones
+    images_info = []
+    for image in src_ws._images:
+        img_cell = image.anchor._from
+        row_idx = img_cell.row
+        col_idx = img_cell.col
+        if row_idx <= header_end_row:
+            images_info.append({
+                'image': image,
+                'row': row_idx,
+                'col': col_idx
+            })
+    
+    return src_wb, images_info
 
 def process_brand_excel(brand_df, input_path, header_end_row, output_path, marca, year, consolidado):
     filename = f"MARCA {marca} {consolidado}-{year}.xlsx"
@@ -207,10 +278,13 @@ def process_brand_excel(brand_df, input_path, header_end_row, output_path, marca
     
     # Crear nuevo archivo
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-        # Escribir los datos de la marca
-        brand_df.columns = brand_df.columns.str.strip()  # Trim whitespace from column names
+        # Primero, copiar las filas de encabezado del archivo original
+        header_df = pd.read_excel(input_path, nrows=header_end_row+1, header=None)
+        header_df.to_excel(writer, sheet_name='Datos', index=False, header=False)
+        
+        # Luego escribir los datos de la marca
         brand_df = brand_df.drop(columns=['UNIT PRICE (RMB)', 'AMOUNT (RMB)'], errors='ignore')
-        brand_df.to_excel(writer, sheet_name='Datos', index=False)
+        brand_df.to_excel(writer, sheet_name='Datos', startrow=header_end_row+1, index=False)
         
         workbook = writer.book
         worksheet = writer.sheets['Datos']
@@ -226,10 +300,44 @@ def process_brand_excel(brand_df, input_path, header_end_row, output_path, marca
             except Exception as e:
                 print(f"Error al copiar imagen: {str(e)}")
         
+        # Copiar formato y estilos de las celdas del encabezado
+        for row in range(1, header_end_row + 2):
+            for col in range(1, src_ws.max_column + 1):
+                src_cell = src_ws.cell(row=row, column=col)
+                dst_cell = worksheet.cell(row=row, column=col)
+                
+                # Copiar formato
+                if src_cell.font:
+                    dst_cell.font = Font(
+                        name=src_cell.font.name,
+                        size=src_cell.font.size,
+                        bold=src_cell.font.bold,
+                        italic=src_cell.font.italic,
+                        vertAlign=src_cell.font.vertAlign,
+                        underline=src_cell.font.underline,
+                        strike=src_cell.font.strike,
+                        color=src_cell.font.color
+                    )
+                if src_cell.fill:
+                    dst_cell.fill = PatternFill(
+                        fill_type=src_cell.fill.fill_type,
+                        start_color=src_cell.fill.start_color,
+                        end_color=src_cell.fill.end_color
+                    )
+                if src_cell.alignment:
+                    dst_cell.alignment = Alignment(
+                        horizontal=src_cell.alignment.horizontal,
+                        vertical=src_cell.alignment.vertical,
+                        text_rotation=src_cell.alignment.text_rotation,
+                        wrap_text=src_cell.alignment.wrap_text,
+                        shrink_to_fit=src_cell.alignment.shrink_to_fit,
+                        indent=src_cell.alignment.indent
+                    )
+        
         # Aplicar color de marca a las filas de datos
         color_hex = get_color_by_brand(marca)
         fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
-        for row in range(2, len(brand_df) + 2):
+        for row in range(header_end_row + 2, header_end_row + len(brand_df) + 2):
             for col in range(1, len(brand_df.columns) + 1):
                 worksheet.cell(row=row, column=col).fill = fill
         
@@ -240,49 +348,31 @@ def process_brand_excel(brand_df, input_path, header_end_row, output_path, marca
             'CTNS': 'CTNS'
         }
         
-        total_row = len(brand_df) + 2
-        worksheet.cell(row=total_row, column=1, value='TOTAL')
-        
         for display_name, col_name in total_columns.items():
             if col_name in brand_df.columns:
                 col_index = list(brand_df.columns).index(col_name) + 1
-                column_letter = get_column_letter(col_index + 1)
-                formula = f'=SUM({column_letter}2:{column_letter}{total_row - 1})'
-                worksheet.cell(row=total_row, column=col_index + 1, value=formula)
-                worksheet.cell(row=total_row, column=col_index + 1).font = Font(bold=True)
-                worksheet.cell(row=total_row, column=col_index + 1).alignment = Alignment(horizontal='right')
-
-        # Clear other cells in the total row
-        for col in range(2, len(brand_df.columns) + 1):
-            if col not in [list(brand_df.columns).index(col_name) + 1 for col_name in total_columns.values()]:
-                worksheet.cell(row=total_row, column=col).value = None
+                column_letter = get_column_letter(col_index)
+                data_start_row = header_end_row + 2
+                data_end_row = header_end_row + len(brand_df) + 1
+                formula = f'=SUM({column_letter}{data_start_row}:{column_letter}{data_end_row})'
+                sum_cell = f'{column_letter}{data_end_row + 1}'
+                worksheet[sum_cell] = formula
+                worksheet[sum_cell].font = Font(bold=True)
+                worksheet[sum_cell].alignment = Alignment(horizontal='right')
 
 def process_excel(input_path, output_path, consolidado):
     try:
-        logging.debug(f"Processing Excel file: {input_path}")
-        logging.debug(f"Output directory: {output_path}")
-        logging.debug(f"Consolidado: {consolidado}")
-        
         # Leer el archivo completo primero sin especificar encabezados
         df_raw = pd.read_excel(input_path, header=None)
-        logging.debug("Excel file read successfully")
         
         # Encontrar la fila real de encabezados
         header_row = find_real_header_row(df_raw)
         if header_row is None:
             raise ValueError("No se encontró la fila de encabezados adecuada")
-        logging.debug(f"Header row found at index: {header_row}")
         
         # Leer el archivo nuevamente usando la fila de encabezados correcta
         df = pd.read_excel(input_path, header=header_row)
-        logging.debug("Excel file re-read with correct header row")
-        
-        # Trim whitespace from column names
-        df.columns = df.columns.str.strip()
-        
-        # Print columns to debug
-        print("Columns received from Excel:", df.columns.tolist())
-        
+
         # Eliminar columnas UNIT PRICE (RMB) y AMOUNT (RMB) si existen
         df = df.drop(columns=['UNIT PRICE (RMB)', 'AMOUNT (RMB)'], errors='ignore')
         
@@ -295,7 +385,6 @@ def process_excel(input_path, output_path, consolidado):
                 
         if marca_col is None:
             raise ValueError("No se encontró la columna de marca")
-        logging.debug(f"Marca column found: {marca_col}")
         
         # Obtener año actual
         current_year = str(datetime.now().year)[-2:]
@@ -305,21 +394,22 @@ def process_excel(input_path, output_path, consolidado):
         
         # Procesar cada marca por separado
         unique_brands = df[marca_col].unique()
-        logging.debug(f"Unique brands found: {unique_brands}")
         for marca in unique_brands:
             if marca and marca.strip():  # Verificar que la marca no esté vacía
                 brand_df = df[df[marca_col] == marca].copy()
-                logging.debug(f"Processing brand: {marca}")
                 process_brand_excel(brand_df, input_path, header_row, output_path, marca, current_year, consolidado)
         
         # Crear archivo de resumen general
         summary_filename = f"RESUMEN_GENERAL_CONSO_{consolidado}-{current_year}.xlsx"
         summary_filepath = os.path.join(output_path, summary_filename)
-        logging.debug(f"Creating summary file: {summary_filepath}")
         
         with pd.ExcelWriter(summary_filepath, engine='openpyxl') as writer:
+            # Copiar estructura de encabezado
+            header_df = pd.read_excel(input_path, nrows=header_row+1, header=None)
+            header_df.to_excel(writer, sheet_name='Datos', index=False, header=False)
+            
             # Escribir datos principales
-            df.to_excel(writer, sheet_name='RESUMEN', index=False)
+            df.to_excel(writer, sheet_name='Datos', startrow=header_row+1, index=False)
             
             # Crear hoja RESULTADOS
             try:
@@ -361,45 +451,18 @@ def process_excel(input_path, output_path, consolidado):
                     worksheet.cell(row=row_num, column=1, value='TOTAL')
                     
                     for col_idx, col in enumerate(summary.columns[1:], start=2):
-                        column_letter = get_column_letter(col_idx)
-                        formula = f'=SUM({column_letter}2:{column_letter}{row_num-1})'
-                        worksheet.cell(row=row_num, column=col_idx, value=formula)
+                        total_value = summary[col].sum()
+                        worksheet.cell(row=row_num, column=col_idx, value=total_value)
                         worksheet.cell(row=row_num, column=col_idx).font = Font(bold=True)
                         worksheet.cell(row=row_num, column=col_idx).alignment = Alignment(horizontal='right')
             except Exception as e:
-                logging.error(f"Error al crear la hoja de resultados: {str(e)}")
+                print(f"Error al crear la hoja de resultados: {str(e)}")
             
-            # Asegurar que la hoja RESUMEN esté visible
-            writer.book['RESUMEN'].sheet_state = 'visible'
-        logging.debug("Summary file created successfully")
+            # Asegurar que la hoja Datos esté visible
+            writer.book['Datos'].sheet_state = 'visible'
     except Exception as e:
-        logging.error(f"Error al procesar el archivo: {str(e)}")
-
-def find_real_header_row(df):
-    keywords = ['CTNS', 'MARCA', 'CBM', 'WEIGHT', 'PRODUCTO', 'PRODUCT PICTURE']
-    for idx, row in df.iterrows():
-        row_str = ' '.join(str(val).upper().strip() for val in row)
-        matches = sum(keyword in row_str for keyword in keywords)
-        if matches >= 3:  # Aumentamos el número mínimo de coincidencias
-            return idx
-    return None
-
-def copy_workbook_structure(input_path, header_end_row):
-    from openpyxl import load_workbook
-
-    wb = load_workbook(input_path)
-    ws = wb.active
-
-    images_info = []
-    for image in ws._images:
-        images_info.append({
-            'image': image,
-            'row': image.anchor._from.row + 1,
-            'col': image.anchor._from.col + 1
-        })
-
-    return wb, images_info
-
+        print(f"Error al procesar el archivo: {str(e)}")
+        
 def main():
     root = tk.Tk()
     app = ExcelProcessorApp(root)

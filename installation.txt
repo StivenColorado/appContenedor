@@ -27,3 +27,6 @@ pyinstaller --onefile --windowed excel_processor.py
 
 # En Mac:
 pyinstaller --onefile --windowed excel_processor.py
+
+
+pyinstaller --onefile --windowed --icon=icon.ico --name=ProcesadorExcel tu_script.py
