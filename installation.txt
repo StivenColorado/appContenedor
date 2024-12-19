@@ -7,7 +7,9 @@ python3 -m venv venv
 source venv/bin/activate
 
 #instalar librerias
-pip install pandas numpy openpyxl tkinter
+pip install pandas numpy openpyxl
+pip install Pillow
+
 
 # Asegúrate de que el entorno virtual está activado
 python excel_processor.py
