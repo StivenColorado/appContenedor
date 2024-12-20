@@ -3,15 +3,19 @@ from tkinter import ttk, filedialog, messagebox
 import pandas as pd
 import numpy as np
 import os
+from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image
 from datetime import datetime
+import logging
+import tempfile
+import shutil
 import io
 from PIL import Image as PILImage
-import logging
 
 # Configure logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ExcelProcessorApp:
     def __init__(self, root):
@@ -133,10 +137,7 @@ class ExcelProcessorApp:
 
     def process_file(self):
         if not self.input_path.get() or not self.output_path.get():
-            messagebox.showerror(
-                "Error",
-                "Por favor seleccione el archivo de entrada y la carpeta de salida"
-            )
+            messagebox.showerror("Error", "Por favor seleccione el archivo de entrada y la carpeta de salida")
             return
         
         self.progress.start()
@@ -197,155 +198,169 @@ def get_color_by_brand(brand):
     }
     return predefined_colors.get(brand.upper(), predefined_colors['DEFAULT'])
 
-def process_brand_excel(brand_df, input_path, header_end_row, output_path, marca, year, consolidado):
+def extract_and_save_images(workbook, temp_dir):
+    """Extract images from Excel and save them to temporary directory"""
+    images_info = []
+    for sheet in workbook.worksheets:
+        for image in sheet._images:
+            img_cell = f"{image.anchor._from.col}_{image.anchor._from.row}"
+            img_path = os.path.join(temp_dir, f"image_{img_cell}.png")
+            
+            try:
+                # Get image data from BytesIO
+                image_data = image.ref
+                # Convert to PIL Image
+                pil_image = PILImage.open(io.BytesIO(image_data.getvalue()))
+                # Save as PNG
+                pil_image.save(img_path, 'PNG')
+                
+                images_info.append({
+                    'path': img_path,
+                    'row': image.anchor._from.row,
+                    'col': image.anchor._from.col,
+                    'cell_reference': img_cell
+                })
+                logging.debug(f"Successfully saved image: {img_path}")
+            except Exception as e:
+                logging.error(f"Failed to save image {img_cell}: {str(e)}")
+    
+    return images_info
+
+def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row):
     filename = f"MARCA {marca} {consolidado}-{year}.xlsx"
     filepath = os.path.join(output_path, filename)
     
-    # Copiar estructura original incluyendo imágenes
-    src_wb, images_info = copy_workbook_structure(input_path, header_end_row)
-    src_ws = src_wb.active
-    
-    # Crear nuevo archivo
+    # Create new workbook
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-        # Escribir los datos de la marca
-        brand_df.columns = brand_df.columns.str.strip()  # Trim whitespace from column names
-        brand_df = brand_df.drop(columns=['UNIT PRICE (RMB)', 'AMOUNT (RMB)'], errors='ignore')
-        brand_df.to_excel(writer, sheet_name='Datos', index=False)
+        brand_df.to_excel(writer, sheet_name='Datos', index=False, startrow=start_row-1)
         
         workbook = writer.book
         worksheet = writer.sheets['Datos']
         
-        # Copiar imágenes del encabezado
-        for img_info in images_info:
-            try:
-                img_path = img_info['image'].path  # Ruta de la imagen original
-                if os.path.exists(img_path):
-                    img = Image(img_path)
-                    cell = worksheet.cell(row=img_info['row'], column=img_info['col'])
-                    worksheet.add_image(img, cell.coordinate)
-            except Exception as e:
-                print(f"Error al copiar imagen: {str(e)}")
+        # Add images to their corresponding cells
+        for idx, row in brand_df.iterrows():
+            row_num = idx + start_row + 1  # Adjust for header and start_row
+            
+            # Find corresponding image for this product
+            product_images = [img for img in images_info 
+                            if img['row'] == idx + start_row]  # Match original row number
+            
+            if product_images:
+                for img_info in product_images:
+                    try:
+                        img = Image(img_info['path'])
+                        cell = worksheet.cell(row=row_num, 
+                                           column=get_column_letter(img_info['col'] + 1))
+                        worksheet.add_image(img, cell.coordinate)
+                    except Exception as e:
+                        logging.error(f"Failed to add image to cell: {str(e)}")
         
-        # Aplicar color de marca a las filas de datos
-        color_hex = get_color_by_brand(marca)
-        fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
-        for row in range(2, len(brand_df) + 2):
-            for col in range(1, len(brand_df.columns) + 1):
-                worksheet.cell(row=row, column=col).fill = fill
+        # Add autosum formulas for specific columns
+        last_row = len(brand_df) + start_row
+        sum_row = last_row + 1
         
-        # Procesar sumas para columnas totales
-        total_columns = {
-            'T/CBM': 'T/CBM',
-            'T/WEIGHT (KG)': 'T/WEIGHT (KG)',
-            'CTNS': 'CTNS'
+        sum_columns = {
+            'CTNS': 'Total Cartones',
+            'T/CBM': 'Total CBM',
+            'T/WEIGHT (KG)': 'Total Peso'
         }
         
-        total_row = len(brand_df) + 2
-        worksheet.cell(row=total_row, column=1, value='TOTAL')
-        
-        totals = {}
-        for display_name, col_name in total_columns.items():
+        for col_name, sum_label in sum_columns.items():
             if col_name in brand_df.columns:
-                col_index = list(brand_df.columns).index(col_name) + 1
-                column_letter = get_column_letter(col_index + 1)
-                formula = f'=SUM({column_letter}2:{column_letter}{total_row - 1})'
-                worksheet.cell(row=total_row, column=col_index + 1, value=formula)
-                worksheet.cell(row=total_row, column=col_index + 1).font = Font(bold=True)
-                worksheet.cell(row=total_row, column=col_index + 1).alignment = Alignment(horizontal='right')
-                totals[col_name] = brand_df[col_name].sum()
-        
-        # Print totals to console
-        print(f"File: {filename}")
-        for col_name, total in totals.items():
-            print(f"{col_name}: {total}")
-
-        # Clear other cells in the total row
-        for col in range(2, len(brand_df.columns) + 1):
-            if col not in [list(brand_df.columns).index(col_name) + 1 for col_name in total_columns.values()]:
-                worksheet.cell(row=total_row, column=col).value = None
+                col_idx = brand_df.columns.get_loc(col_name) + 1
+                col_letter = get_column_letter(col_idx)
+                
+                # Add sum formula
+                formula = f'=SUM({col_letter}{start_row + 1}:{col_letter}{last_row})'
+                cell = worksheet.cell(row=sum_row, column=col_idx)
+                cell.value = formula
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal='right')
+                
+                # Add label
+                label_cell = worksheet.cell(row=sum_row, column=col_idx-1)
+                label_cell.value = sum_label
+                label_cell.font = Font(bold=True)
 
 def process_excel(input_path, output_path, consolidado):
     try:
         logging.debug(f"Processing Excel file: {input_path}")
         logging.debug(f"Output directory: {output_path}")
-        logging.debug(f"Consolidado: {consolidado}")
         
-        # Leer el archivo completo primero sin especificar encabezados
-        df_raw = pd.read_excel(input_path, header=None)
-        logging.debug("Excel file read successfully")
+        # Create temporary directory for images
+        temp_dir = tempfile.mkdtemp()
+        logging.debug(f"Created temporary directory: {temp_dir}")
         
-        # Encontrar la fila real de encabezados
-        header_row = find_real_header_row(df_raw)
+        # Load workbook and extract images
+        workbook = load_workbook(input_path)
+        images_info = extract_and_save_images(workbook, temp_dir)
+        logging.debug(f"Extracted {len(images_info)} images")
+        
+        # Read Excel file
+        df = pd.read_excel(input_path, header=None)
+        
+        # Find header row
+        header_row = None
+        for idx, row in df.iterrows():
+            row_values = [str(val).upper().strip() for val in row.values]
+            row_text = ' '.join(row_values)
+            if 'MARCA DEL PRODUCTO' in row_text or 'PRODUCT PICTURE' in row_text:
+                header_row = idx
+                break
+        
         if header_row is None:
-            raise ValueError("No se encontró la fila de encabezados adecuada")
-        logging.debug(f"Header row found at index: {header_row}")
+            raise ValueError("No se encontró la fila de encabezados")
         
-        # Leer el archivo nuevamente usando la fila de encabezados correcta
+        # Read data with correct header
         df = pd.read_excel(input_path, header=header_row)
-        logging.debug("Excel file re-read with correct header row")
         
-        # Trim whitespace from column names
+        # Clean column names
         df.columns = df.columns.str.strip()
         
-        # Print columns to debug
-        print("Columns received from Excel:", df.columns.tolist())
+        # Remove unnecessary columns if they exist
+        columns_to_drop = ['UNIT PRICE\n(RMB)', 'AMOUNT \n(RMB)']
+        df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
         
-        # Eliminar columnas UNIT PRICE (RMB) y AMOUNT (RMB) si existen
-        df = df.drop(columns=['UNIT PRICE (RMB)', 'AMOUNT (RMB)'], errors='ignore')
-        
-        # Identificar columna de marca
-        marca_col = None
-        for col in df.columns:
-            if any(keyword in str(col).upper() for keyword in ['品牌', 'MARCA']):
-                marca_col = col
-                break
-                
-        if marca_col is None:
-            raise ValueError("No se encontró la columna de marca")
-        logging.debug(f"Marca column found: {marca_col}")
-        
-        # Obtener año actual
+        # Process each brand
+        marca_col = 'MARCA DEL PRODUCTO'
         current_year = str(datetime.now().year)[-2:]
         
-        # Limpiar y convertir la columna de marca a string
-        df[marca_col] = df[marca_col].fillna('SIN MARCA').astype(str)
-        
-        # Procesar cada marca por separado
-        unique_brands = df[marca_col].unique()
-        logging.debug(f"Unique brands found: {unique_brands}")
-        for marca in unique_brands:
-            if marca and marca.strip():  # Verificar que la marca no esté vacía
+        for marca in df[marca_col].unique():
+            if pd.notna(marca):
                 brand_df = df[df[marca_col] == marca].copy()
-                logging.debug(f"Processing brand: {marca}")
-                process_brand_excel(brand_df, input_path, header_row, output_path, marca, current_year, consolidado)
+                process_brand_excel(brand_df, output_path, marca, current_year, 
+                                 consolidado, images_info, header_row + 2)
         
-        # Crear archivo de resumen general
+        # Create general summary file
         summary_filename = f"RESUMEN_GENERAL_CONSO_{consolidado}-{current_year}.xlsx"
         summary_filepath = os.path.join(output_path, summary_filename)
         logging.debug(f"Creating summary file: {summary_filepath}")
         
         with pd.ExcelWriter(summary_filepath, engine='openpyxl') as writer:
-            # Escribir datos principales
+            # Write main data sheet
             df.to_excel(writer, sheet_name='RESUMEN', index=False)
             
-            # Crear hoja RESULTADOS
+            # Create RESULTADOS sheet
             try:
+                # Define columns for summary
                 summary_columns = {
                     'CTNS': 'CARTONES',
                     'T/CBM': 'CUBICAJE',
                     'T/WEIGHT (KG)': 'PESO'
                 }
                 
-                # Buscar las columnas correctas en el DataFrame
+                # Find matching columns in DataFrame
                 agg_dict = {}
-                for old_col in summary_columns.keys():
+                for old_col, new_col in summary_columns.items():
                     matching_cols = [col for col in df.columns if old_col in str(col)]
                     if matching_cols:
                         agg_dict[matching_cols[0]] = 'sum'
                 
                 if agg_dict:
+                    # Create summary by brand
                     summary = df.groupby(marca_col).agg(agg_dict).reset_index()
-                    # Renombrar columnas
+                    
+                    # Rename columns
                     new_columns = [marca_col]
                     for col in summary.columns[1:]:
                         for old_col, new_col in summary_columns.items():
@@ -356,32 +371,65 @@ def process_excel(input_path, output_path, consolidado):
                             new_columns.append(col)
                     summary.columns = new_columns
                     
+                    # Write summary to Excel
                     summary.to_excel(writer, sheet_name='RESULTADOS', index=False)
                     
-                    # Asegurar que la hoja RESULTADOS esté visible
-                    writer.book['RESULTADOS'].sheet_state = 'visible'
-                    
-                    # Agregar fila de totales
-                    workbook = writer.book
+                    # Get worksheet reference
                     worksheet = writer.sheets['RESULTADOS']
+                    
+                    # Add totals row
                     row_num = len(summary) + 2
                     worksheet.cell(row=row_num, column=1, value='TOTAL')
                     
+                    # Add sum formulas for numeric columns
                     for col_idx, col in enumerate(summary.columns[1:], start=2):
                         column_letter = get_column_letter(col_idx)
                         formula = f'=SUM({column_letter}2:{column_letter}{row_num-1})'
-                        worksheet.cell(row=row_num, column=col_idx, value=formula)
-                        worksheet.cell(row=row_num, column=col_idx).font = Font(bold=True)
-                        worksheet.cell(row=row_num, column=col_idx).alignment = Alignment(horizontal='right')
+                        cell = worksheet.cell(row=row_num, column=col_idx, value=formula)
+                        cell.font = Font(bold=True)
+                        cell.alignment = Alignment(horizontal='right')
+                    
+                    # Apply formatting to summary sheet
+                    for row in worksheet.iter_rows(min_row=1, max_row=1):
+                        for cell in row:
+                            cell.font = Font(bold=True)
+                            cell.alignment = Alignment(horizontal='center')
+                    
+                    # Adjust column widths
+                    for column_cells in worksheet.columns:
+                        length = max(len(str(cell.value)) for cell in column_cells)
+                        worksheet.column_dimensions[get_column_letter(column_cells[0].column)].width = length + 2
+                
             except Exception as e:
-                logging.error(f"Error al crear la hoja de resultados: {str(e)}")
+                logging.error(f"Error creating results sheet: {str(e)}")
             
-            # Asegurar que la hoja RESUMEN esté visible
-            writer.book['RESUMEN'].sheet_state = 'visible'
-        logging.debug("Summary file created successfully")
+            # Format main sheet
+            worksheet = writer.sheets['RESUMEN']
+            for row in worksheet.iter_rows(min_row=1, max_row=1):
+                for cell in row:
+                    cell.font = Font(bold=True)
+                    cell.alignment = Alignment(horizontal='center')
+            
+            # Add images to main sheet
+            for img_info in images_info:
+                try:
+                    img = Image(img_info['path'])
+                    cell = worksheet.cell(row=img_info['row'] + 1, 
+                                       column=img_info['col'] + 1)
+                    worksheet.add_image(img, cell.coordinate)
+                except Exception as e:
+                    logging.error(f"Failed to add image to summary: {str(e)}")
+        
+        # Clean up temporary files
+        shutil.rmtree(temp_dir)
+        logging.debug("Finished processing successfully")
+        
     except Exception as e:
-        logging.error(f"Error al procesar el archivo: {str(e)}")
-
+        logging.error(f"Error processing file: {str(e)}")
+        if 'temp_dir' in locals():
+            shutil.rmtree(temp_dir)
+        raise
+    
 def find_real_header_row(df):
     keywords = ['CTNS', 'MARCA', 'CBM', 'WEIGHT', 'PRODUCTO', 'PRODUCT PICTURE']
     for idx, row in df.iterrows():
