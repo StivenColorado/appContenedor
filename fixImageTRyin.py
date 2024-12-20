@@ -330,7 +330,7 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
     
     # Procesar cada fila del DataFrame
     for df_idx, row in brand_df.iterrows():
-        excel_row = EXCEL_START_ROW + df_idx  # Ajuste para que los datos se escriban justo debajo de los encabezados
+        excel_row = EXCEL_START_ROW + df_idx + 1  # +1 porque ya escribimos los encabezados
         original_row = start_row + df_idx
         
         # Escribir datos de la fila
@@ -358,14 +358,14 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
                 logging.error(f"Failed to add image for row {excel_row}: {str(e)}")
     
     # Agregar fórmulas de suma al final
-    total_row = EXCEL_START_ROW + len(brand_df)
+    total_row = EXCEL_START_ROW + len(brand_df) + 1
     
     # Identificar columnas numéricas para las sumas
     numeric_columns = []
     for col_idx, col_name in enumerate(brand_df.columns, 1):
         if any(keyword in str(col_name).upper() for keyword in ['CTNS', 'CBM', 'WEIGHT', 'TOTAL']):
             col_letter = get_column_letter(col_idx)
-            start_cell = f"{col_letter}{EXCEL_START_ROW}"
+            start_cell = f"{col_letter}{EXCEL_START_ROW + 1}"
             end_cell = f"{col_letter}{total_row - 1}"
             
             # Agregar fórmula de suma
@@ -410,6 +410,7 @@ def process_excel(input_path, output_path, consolidado):
             if 'SHIPPING MARK MARCA' in row_text or 'PRODUCT PICTURE' in row_text:
                 header_row = idx
                 break
+            
         
         if header_row is None:
             raise ValueError("No se encontró la fila de encabezados")
@@ -420,13 +421,13 @@ def process_excel(input_path, output_path, consolidado):
         # Leer datos con el encabezado correcto
         df = pd.read_excel(input_path, header=header_row)
         
-        # Limpiar nombres de columnas
-        df.columns = df.columns.str.strip()
-        
         # Encontrar la columna de marca
         marca_col = find_brand_column(df)
         if marca_col is None:
             raise ValueError("No se encontró la columna de marca del producto")
+        
+        # Limpiar nombres de columnas
+        df.columns = df.columns.str.strip()
         
         # Procesar por marca
         df[marca_col] = df[marca_col].astype(str).str.strip().str.upper()
@@ -447,7 +448,6 @@ def process_excel(input_path, output_path, consolidado):
         if 'temp_dir' in locals():
             shutil.rmtree(temp_dir)
         raise
-
 def create_pdf_from_excel(excel_path, pdf_path):
     workbook = load_workbook(excel_path)
     sheet = workbook['RESULTADOS']
@@ -461,7 +461,6 @@ def create_pdf_from_excel(excel_path, pdf_path):
         pdf.cell(200, 10, txt=" | ".join(row_data).encode('latin-1', 'replace').decode('latin-1'), ln=True)
     
     pdf.output(pdf_path)
-
 def resize_image(image_path, max_width, max_height):
     """
     Redimensiona la imagen para que se ajuste a las dimensiones máximas permitidas
@@ -473,6 +472,7 @@ def resize_image(image_path, max_width, max_height):
         temp_path = image_path.replace(".png", "_resized.png")
         img.save(temp_path, "PNG")
         return temp_path
+
 
 def find_real_header_row(df):
     keywords = ['CTNS', 'MARCA', 'CBM', 'WEIGHT', 'PRODUCTO', 'PRODUCT PICTURE']
