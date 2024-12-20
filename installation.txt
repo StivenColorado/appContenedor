@@ -7,7 +7,7 @@ python3 -m venv venv
 source venv/bin/activate
 
 #instalar librerias
-pip install pandas numpy openpyxl fpdf
+pip install pandas numpy openpyxl fpdf Pillow
 pip install Pillow
 
 

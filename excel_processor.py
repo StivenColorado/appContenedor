@@ -266,13 +266,44 @@ def extract_and_save_images(workbook, temp_dir, header_row):
     
     return images_info
 
+def resize_image(image_path, max_width, max_height):
+    """
+    Redimensiona la imagen para que se ajuste a las dimensiones máximas permitidas
+    sin distorsionarla.
+    """
+    with PILImage.open(image_path) as img:
+        # Calcular proporciones y redimensionar
+        img.thumbnail((max_width, max_height), PILImage.LANCZOS)
+        temp_path = image_path.replace(".png", "_resized.png")
+        img.save(temp_path, "PNG")
+        return temp_path
+
+def add_image_to_cell(worksheet, image_path, cell, max_width, max_height, row_height=None):
+    """
+    Agrega una imagen redimensionada al Excel y ajusta la fila y columna si es necesario.
+    """
+    # Redimensionar imagen
+    resized_image_path = resize_image(image_path, max_width, max_height)
+    img = Image(resized_image_path)
+
+    # Añadir imagen a la celda
+    worksheet.add_image(img, cell.coordinate)
+
+    # Ajustar dimensiones de la fila
+    if row_height:
+        worksheet.row_dimensions[cell.row].height = row_height
+
+    # Ajustar ancho de columna automáticamente
+    col_letter = get_column_letter(cell.column)
+    worksheet.column_dimensions[col_letter].width = max_width / 7  # Relación aproximada
+
 def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row):
     filename = f"MARCA_{marca}_{consolidado}-{year}.xlsx"
     filepath = os.path.join(output_path, filename)
     
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
         # Write the data starting after header images
-        brand_df.to_excel(writer, sheet_name='Datos', index=False, startrow=len(images_info['header']))
+        brand_df.to_excel(writer, sheet_name='Datos', index=False, startrow=5)
         
         workbook = writer.book
         worksheet = writer.sheets['Datos']
@@ -300,7 +331,7 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
         
         # Add product images in their corresponding rows
         for idx, row in brand_df.iterrows():
-            row_num = idx + len(images_info['header']) + 2  # +2 for header row and 0-based index
+            row_num = idx + 6  # Start from the 6th row
             
             # Find corresponding product image
             product_images = [img for img in images_info['products'] 
@@ -308,15 +339,18 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
             
             if product_images:
                 try:
-                    img = Image(product_images[0]['path'])
-                    cell = worksheet.cell(row=row_num, 
-                                       column=image_col_idx + 1)
-                    worksheet.add_image(img, cell.coordinate)
+                    cell = worksheet.cell(row=row_num, column=image_col_idx + 1)
+                    add_image_to_cell(worksheet, product_images[0]['path'], cell, max_width=150, max_height=100, row_height=80)
                 except Exception as e:
                     logging.error(f"Failed to add product image for row {row_num}: {str(e)}")
         
+        # Adjust column width and row height for product picture column
+        if image_col_idx is not None:
+            col_letter = get_column_letter(image_col_idx + 1)
+            worksheet.column_dimensions[col_letter].width = 25  # Set a wider column width for images
+        
         # Add autosum formulas
-        last_row = len(brand_df) + len(images_info['header']) + 1
+        last_row = len(brand_df) + 5
         sum_row = last_row + 1
         
         sum_columns = {
@@ -331,7 +365,7 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
                 col_letter = get_column_letter(col_idx)
                 
                 # Adjust formula to account for header images
-                start_data_row = len(images_info['header']) + 2
+                start_data_row = 6
                 formula = f'=SUM({col_letter}{start_data_row}:{col_letter}{last_row})'
                 
                 cell = worksheet.cell(row=sum_row, column=col_idx)
@@ -342,7 +376,12 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
                 label_cell = worksheet.cell(row=sum_row, column=col_idx-1)
                 label_cell.value = sum_label
                 label_cell.font = Font(bold=True)
-                
+        
+        # Clear unnecessary cells in the total row
+        for col_idx in range(1, len(brand_df.columns) + 1):
+            if col_idx not in [brand_df.columns.get_loc(col_name) + 1 for col_name in sum_columns.keys()]:
+                worksheet.cell(row=sum_row, column=col_idx).value = None
+
 def create_pdf_from_excel(excel_path, pdf_path):
     workbook = load_workbook(excel_path)
     sheet = workbook['RESULTADOS']
