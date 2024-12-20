@@ -14,15 +14,16 @@ import shutil
 import io
 from PIL import Image as PILImage
 from fpdf import FPDF
+import re
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# Suppress Tkinter deprecation warning
+os.environ['TK_SILENCE_DEPRECATION'] = '1'
 
 class ExcelProcessorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Procesador de Excel")
-        self.root.geometry("600x400")
+        self.root.geometry("600x450")
         
         # Configurar el estilo
         style = ttk.Style()
@@ -70,6 +71,25 @@ class ExcelProcessorApp:
         )
         self.input_button.pack(side=tk.RIGHT)
         
+        # Número de consolidado
+        self.consolidado_frame = ttk.Frame(self.file_frame)
+        self.consolidado_frame.pack(fill=tk.X, pady=10)
+        
+        self.consolidado_label = ttk.Label(
+            self.consolidado_frame,
+            text="Número de consolidado:",
+            font=('Helvetica', 10)
+        )
+        self.consolidado_label.pack(side=tk.LEFT)
+        
+        self.consolidado_var = tk.StringVar()
+        self.consolidado_entry = ttk.Entry(
+            self.consolidado_frame,
+            textvariable=self.consolidado_var,
+            width=10
+        )
+        self.consolidado_entry.pack(side=tk.LEFT, padx=5)
+        
         # Output directory
         self.output_path = tk.StringVar()
         self.output_label = ttk.Label(
@@ -104,15 +124,6 @@ class ExcelProcessorApp:
         )
         self.process_button.pack(pady=30)
         
-        # Barra de progreso
-        self.progress = ttk.Progressbar(
-            self.main_frame,
-            orient=tk.HORIZONTAL,
-            length=300,
-            mode='indeterminate'
-        )
-        self.progress.pack(pady=10)
-        
         # Status label
         self.status_label = ttk.Label(
             self.main_frame,
@@ -128,6 +139,24 @@ class ExcelProcessorApp:
         )
         if filename:
             self.input_path.set(filename)
+            # Intentar extraer el número de consolidado del archivo
+            try:
+                df = pd.read_excel(filename)
+                zafiro_text = None
+                for column in df.columns:
+                    for value in df[column].astype(str):
+                        if 'ZAFIRO-' in value:
+                            zafiro_text = value
+                            break
+                    if zafiro_text:
+                        break
+                
+                if zafiro_text:
+                    match = re.search(r'ZAFIRO-(\d+)-\d+', zafiro_text)
+                    if match:
+                        self.consolidado_var.set(match.group(1))
+            except Exception as e:
+                logging.error(f"Error extracting consolidado number: {str(e)}")
 
     def select_output_directory(self):
         directory = filedialog.askdirectory(
@@ -137,11 +166,10 @@ class ExcelProcessorApp:
             self.output_path.set(directory)
 
     def process_file(self):
-        if not self.input_path.get() or not self.output_path.get():
-            messagebox.showerror("Error", "Por favor seleccione el archivo de entrada y la carpeta de salida")
+        if not self.input_path.get() or not self.output_path.get() or not self.consolidado_var.get():
+            messagebox.showerror("Error", "Por favor complete todos los campos requeridos")
             return
         
-        self.progress.start()
         self.status_label.config(text="Procesando archivo...")
         self.process_button.state(['disabled'])
         
@@ -149,21 +177,18 @@ class ExcelProcessorApp:
 
     def run_processing(self):
         try:
-            consolidado = "CONSOLIDADO"  # Define the consolidado value
+            consolidado = self.consolidado_var.get()
             process_excel(self.input_path.get(), self.output_path.get(), consolidado)
-            self.progress.stop()
             self.status_label.config(text="¡Archivos procesados correctamente!")
             messagebox.showinfo(
                 "Éxito",
                 "Los archivos han sido procesados correctamente"
             )
         except Exception as e:
-            self.progress.stop()
             self.status_label.config(text="Error al procesar los archivos")
             messagebox.showerror("Error", str(e))
         finally:
             self.process_button.state(['!disabled'])
-            self.progress.stop()
 
 def clean_numeric_value(value):
     if pd.isna(value):
@@ -242,7 +267,7 @@ def extract_and_save_images(workbook, temp_dir, header_row):
     return images_info
 
 def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row):
-    filename = f"MARCA {marca} {consolidado}-{year}.xlsx"
+    filename = f"MARCA_{marca}_{consolidado}-{year}.xlsx"
     filepath = os.path.join(output_path, filename)
     
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
@@ -320,7 +345,7 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
                 
 def create_pdf_from_excel(excel_path, pdf_path):
     workbook = load_workbook(excel_path)
-    sheet = workbook.active
+    sheet = workbook['RESULTADOS']
     
     pdf = FPDF()
     pdf.add_page()
@@ -378,7 +403,7 @@ def process_excel(input_path, output_path, consolidado):
                 process_brand_excel(brand_df, output_path, marca, current_year, 
                                  consolidado, images_info, header_row + 2)
         
-        # Crear archivo de resumen general
+        # Create general summary file
         summary_filename = f"RESUMEN_GENERAL_CONSO_{consolidado}-{current_year}.xlsx"
         summary_filepath = os.path.join(output_path, summary_filename)
         logging.debug(f"Creating summary file: {summary_filepath}")
