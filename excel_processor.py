@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.DEBUG)
 # Constantes para el tamaño de las imágenes
 IMAGE_WIDTH = 90  # Ancho en píxeles
 IMAGE_HEIGHT = 90  # Alto en píxeles
-EXCEL_START_ROW = 4  # Fila donde comenzarán las imágenes
+EXCEL_START_ROW = 6  # Fila donde comenzarán las imágenes
 
 class ExcelProcessorApp:
     def __init__(self, root):
@@ -235,7 +235,7 @@ def find_brand_column(df):
     """
     Encuentra la columna que contiene la marca del producto
     """
-    possible_names = ['MARCA DEL PRODUCTO', 'MARCA', 'BRAND']
+    possible_names = ['SHIPPING MARK MARCA', 'SHIPPING MARK', 'MARCA']
     for col in df.columns:
         if any(name in str(col).upper() for name in possible_names):
             return col
@@ -243,7 +243,7 @@ def find_brand_column(df):
 
 def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
     """
-    Extrae y guarda las imágenes con tamaño uniforme
+    Extrae y guarda las imágenes con tamaño uniforme manteniendo la información de posición original
     """
     images_info = {
         'header': [],
@@ -276,20 +276,22 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
                 # Guardar la imagen procesada
                 new_image.save(img_path, 'PNG')
                 
-                # Guardar información de la imagen
+                row_index = image.anchor._from.row
+                
+                # Guardar información de la imagen con su posición original
                 image_info = {
                     'path': img_path,
-                    'original_row': image.anchor._from.row,
+                    'original_row': row_index,
                     'original_col': image.anchor._from.col
                 }
                 
-                # Clasificar la imagen
-                if image.anchor._from.row <= header_row:
+                # Clasificar la imagen manteniendo el índice original
+                if row_index <= header_row:
                     images_info['header'].append(image_info)
                 else:
-                    images_info['products'][image.anchor._from.row] = image_info
+                    images_info['products'][row_index] = image_info
                 
-                logging.debug(f"Processed image at row {image.anchor._from.row}, col {image.anchor._from.col}")
+                logging.debug(f"Processed image at row {row_index}, col {image.anchor._from.col}")
                 
             except Exception as e:
                 logging.error(f"Failed to process image {img_cell}: {str(e)}")
@@ -298,7 +300,7 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
 
 def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row):
     """
-    Procesa el Excel para una marca específica
+    Procesa el Excel para una marca específica con posicionamiento correcto de imágenes
     """
     filename = f"MARCA_{marca}_{consolidado}-{year}.xlsx"
     filepath = os.path.join(output_path, filename)
@@ -321,56 +323,33 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
             # Ajustar el tamaño de la columna de imágenes
             worksheet.column_dimensions[get_column_letter(product_pic_col)].width = 15
             
-            # Calcular offset para las filas
-            row_offset = EXCEL_START_ROW - start_row
-            
-            # Mapear imágenes a las filas correspondientes
-            for idx, row in brand_df.iterrows():
-                original_row = start_row + idx
-                new_row = EXCEL_START_ROW + idx
+            # Procesar cada fila del DataFrame
+            for df_idx, row in brand_df.iterrows():
+                # Calcular la fila correspondiente en el Excel
+                excel_row = EXCEL_START_ROW + df_idx
+                original_row = start_row + df_idx
                 
-                if original_row in images_info['products']:
-                    try:
-                        # Ajustar altura de la fila
-                        worksheet.row_dimensions[new_row].height = 70
-                        
-                        # Obtener información de la imagen
-                        img_info = images_info['products'][original_row]
-                        img = Image(img_info['path'])
-                        
-                        # Añadir imagen en la posición correcta
-                        cell = worksheet.cell(row=new_row, column=product_pic_col)
-                        worksheet.add_image(img, cell.coordinate)
-                        
-                    except Exception as e:
-                        logging.error(f"Failed to add image for row {original_row}: {str(e)}")
-        
-        # Añadir totales al final
-        last_row = len(brand_df) + EXCEL_START_ROW
-        sum_row = last_row + 2
-        
-        sum_columns = {
-            'CTNS': 'Total Cartones',
-            'T/CBM': 'Total CBM',
-            'T/WEIGHT (KG)': 'Total Peso'
-        }
-        
-        for col_name, sum_label in sum_columns.items():
-            if col_name in brand_df.columns:
-                col_idx = brand_df.columns.get_loc(col_name) + 1
-                col_letter = get_column_letter(col_idx)
+                # Ajustar altura de la fila
+                worksheet.row_dimensions[excel_row].height = 70
                 
-                # Añadir etiqueta
-                label_cell = worksheet.cell(row=sum_row, column=col_idx-1)
-                label_cell.value = sum_label
-                label_cell.font = Font(bold=True)
-                
-                # Añadir fórmula
-                sum_cell = worksheet.cell(row=sum_row, column=col_idx)
-                sum_cell.value = f'=SUM({col_letter}{EXCEL_START_ROW}:{col_letter}{last_row})'
-                sum_cell.font = Font(bold=True)
-                sum_cell.alignment = Alignment(horizontal='right')
-
+                # Buscar imagen correspondiente
+                for img_row, img_info in images_info['products'].items():
+                    # Verificar si esta imagen corresponde a la fila actual
+                    if img_row == original_row:
+                        try:
+                            # Crear imagen
+                            img = Image(img_info['path'])
+                            
+                            # Calcular la celda destino
+                            cell = worksheet.cell(row=excel_row, column=product_pic_col)
+                            
+                            # Añadir imagen
+                            worksheet.add_image(img, cell.coordinate)
+                            logging.debug(f"Added image to row {excel_row}, column {product_pic_col}")
+                            break
+                            
+                        except Exception as e:
+                            logging.error(f"Failed to add image for row {excel_row}: {str(e)}")
 def process_excel(input_path, output_path, consolidado):
     try:
         if not input_path.endswith(('.xlsx', '.xls')):
@@ -388,9 +367,10 @@ def process_excel(input_path, output_path, consolidado):
         for idx, row in df_temp.iterrows():
             row_values = [str(val).upper().strip() for val in row.values]
             row_text = ' '.join(row_values)
-            if 'MARCA DEL PRODUCTO' in row_text or 'PRODUCT PICTURE' in row_text:
+            if 'SHIPPING MARK MARCA' in row_text or 'PRODUCT PICTURE' in row_text:
                 header_row = idx
                 break
+            
         
         if header_row is None:
             raise ValueError("No se encontró la fila de encabezados")
