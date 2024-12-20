@@ -13,6 +13,7 @@ import tempfile
 import shutil
 import io
 from PIL import Image as PILImage
+from fpdf import FPDF
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -198,9 +199,15 @@ def get_color_by_brand(brand):
     }
     return predefined_colors.get(brand.upper(), predefined_colors['DEFAULT'])
 
-def extract_and_save_images(workbook, temp_dir):
-    """Extract images from Excel and save them to temporary directory"""
-    images_info = []
+def extract_and_save_images(workbook, temp_dir, header_row):
+    """
+    Extract images from Excel and categorize them as header or product images
+    """
+    images_info = {
+        'header': [],
+        'products': []
+    }
+    
     for sheet in workbook.worksheets:
         for image in sheet._images:
             img_cell = f"{image.anchor._from.col}_{image.anchor._from.row}"
@@ -214,12 +221,20 @@ def extract_and_save_images(workbook, temp_dir):
                 # Save as PNG
                 pil_image.save(img_path, 'PNG')
                 
-                images_info.append({
+                # Categorize image based on row position
+                image_info = {
                     'path': img_path,
                     'row': image.anchor._from.row,
                     'col': image.anchor._from.col,
                     'cell_reference': img_cell
-                })
+                }
+                
+                # If image is above or at header row, it's a header image
+                if image.anchor._from.row <= header_row:
+                    images_info['header'].append(image_info)
+                else:
+                    images_info['products'].append(image_info)
+                
                 logging.debug(f"Successfully saved image: {img_path}")
             except Exception as e:
                 logging.error(f"Failed to save image {img_cell}: {str(e)}")
@@ -230,33 +245,53 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
     filename = f"MARCA {marca} {consolidado}-{year}.xlsx"
     filepath = os.path.join(output_path, filename)
     
-    # Create new workbook
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-        brand_df.to_excel(writer, sheet_name='Datos', index=False, startrow=start_row-1)
+        # Write the data starting after header images
+        brand_df.to_excel(writer, sheet_name='Datos', index=False, startrow=len(images_info['header']))
         
         workbook = writer.book
         worksheet = writer.sheets['Datos']
         
-        # Add images to their corresponding cells
+        # Add header images first
+        for img_info in images_info['header']:
+            try:
+                img = Image(img_info['path'])
+                cell = worksheet.cell(row=img_info['row'] + 1, 
+                                   column=img_info['col'] + 1)
+                worksheet.add_image(img, cell.coordinate)
+            except Exception as e:
+                logging.error(f"Failed to add header image: {str(e)}")
+        
+        # Find the image column index (assuming it's named 'PRODUCT PICTURE' or similar)
+        image_col_idx = None
+        for idx, col in enumerate(brand_df.columns):
+            if 'PRODUCT PICTURE' in str(col).upper():
+                image_col_idx = idx
+                break
+        
+        if image_col_idx is None:
+            logging.warning("Product image column not found")
+            return
+        
+        # Add product images in their corresponding rows
         for idx, row in brand_df.iterrows():
-            row_num = idx + start_row + 1  # Adjust for header and start_row
+            row_num = idx + len(images_info['header']) + 2  # +2 for header row and 0-based index
             
-            # Find corresponding image for this product
-            product_images = [img for img in images_info 
-                            if img['row'] == idx + start_row]  # Match original row number
+            # Find corresponding product image
+            product_images = [img for img in images_info['products'] 
+                            if img['row'] == idx + start_row]
             
             if product_images:
-                for img_info in product_images:
-                    try:
-                        img = Image(img_info['path'])
-                        cell = worksheet.cell(row=row_num, 
-                                           column=get_column_letter(img_info['col'] + 1))
-                        worksheet.add_image(img, cell.coordinate)
-                    except Exception as e:
-                        logging.error(f"Failed to add image to cell: {str(e)}")
+                try:
+                    img = Image(product_images[0]['path'])
+                    cell = worksheet.cell(row=row_num, 
+                                       column=image_col_idx + 1)
+                    worksheet.add_image(img, cell.coordinate)
+                except Exception as e:
+                    logging.error(f"Failed to add product image for row {row_num}: {str(e)}")
         
-        # Add autosum formulas for specific columns
-        last_row = len(brand_df) + start_row
+        # Add autosum formulas
+        last_row = len(brand_df) + len(images_info['header']) + 1
         sum_row = last_row + 1
         
         sum_columns = {
@@ -270,38 +305,45 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
                 col_idx = brand_df.columns.get_loc(col_name) + 1
                 col_letter = get_column_letter(col_idx)
                 
-                # Add sum formula
-                formula = f'=SUM({col_letter}{start_row + 1}:{col_letter}{last_row})'
+                # Adjust formula to account for header images
+                start_data_row = len(images_info['header']) + 2
+                formula = f'=SUM({col_letter}{start_data_row}:{col_letter}{last_row})'
+                
                 cell = worksheet.cell(row=sum_row, column=col_idx)
                 cell.value = formula
                 cell.font = Font(bold=True)
                 cell.alignment = Alignment(horizontal='right')
                 
-                # Add label
                 label_cell = worksheet.cell(row=sum_row, column=col_idx-1)
                 label_cell.value = sum_label
                 label_cell.font = Font(bold=True)
+                
+def create_pdf_from_excel(excel_path, pdf_path):
+    workbook = load_workbook(excel_path)
+    sheet = workbook.active
+    
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=10)
+    
+    for row in sheet.iter_rows(values_only=True):
+        row_data = [str(cell) if cell is not None else '' for cell in row]
+        pdf.cell(200, 10, txt=" | ".join(row_data).encode('latin-1', 'replace').decode('latin-1'), ln=True)
+    
+    pdf.output(pdf_path)
 
 def process_excel(input_path, output_path, consolidado):
     try:
-        logging.debug(f"Processing Excel file: {input_path}")
-        logging.debug(f"Output directory: {output_path}")
-        
         # Create temporary directory for images
         temp_dir = tempfile.mkdtemp()
-        logging.debug(f"Created temporary directory: {temp_dir}")
         
-        # Load workbook and extract images
+        # Load workbook
         workbook = load_workbook(input_path)
-        images_info = extract_and_save_images(workbook, temp_dir)
-        logging.debug(f"Extracted {len(images_info)} images")
         
-        # Read Excel file
-        df = pd.read_excel(input_path, header=None)
-        
-        # Find header row
+        # Find header row first
+        df_temp = pd.read_excel(input_path, header=None)
         header_row = None
-        for idx, row in df.iterrows():
+        for idx, row in df_temp.iterrows():
             row_values = [str(val).upper().strip() for val in row.values]
             row_text = ' '.join(row_values)
             if 'MARCA DEL PRODUCTO' in row_text or 'PRODUCT PICTURE' in row_text:
@@ -311,8 +353,13 @@ def process_excel(input_path, output_path, consolidado):
         if header_row is None:
             raise ValueError("No se encontró la fila de encabezados")
         
+        # Extract and categorize images
+        images_info = extract_and_save_images(workbook, temp_dir, header_row)
+        logging.debug(f"Extracted {len(images_info['header'])} header images and {len(images_info['products'])} product images")
+        
         # Read data with correct header
         df = pd.read_excel(input_path, header=header_row)
+        
         
         # Clean column names
         df.columns = df.columns.str.strip()
@@ -331,7 +378,7 @@ def process_excel(input_path, output_path, consolidado):
                 process_brand_excel(brand_df, output_path, marca, current_year, 
                                  consolidado, images_info, header_row + 2)
         
-        # Create general summary file
+        # Crear archivo de resumen general
         summary_filename = f"RESUMEN_GENERAL_CONSO_{consolidado}-{current_year}.xlsx"
         summary_filepath = os.path.join(output_path, summary_filename)
         logging.debug(f"Creating summary file: {summary_filepath}")
@@ -411,7 +458,7 @@ def process_excel(input_path, output_path, consolidado):
                     cell.alignment = Alignment(horizontal='center')
             
             # Add images to main sheet
-            for img_info in images_info:
+            for img_info in images_info['products']:
                 try:
                     img = Image(img_info['path'])
                     cell = worksheet.cell(row=img_info['row'] + 1, 
@@ -419,6 +466,11 @@ def process_excel(input_path, output_path, consolidado):
                     worksheet.add_image(img, cell.coordinate)
                 except Exception as e:
                     logging.error(f"Failed to add image to summary: {str(e)}")
+        
+        # Create PDF from Excel
+        pdf_filename = f"RESUMEN_GENERAL_CONSO_{consolidado}-{current_year}.pdf"
+        pdf_filepath = os.path.join(output_path, pdf_filename)
+        create_pdf_from_excel(summary_filepath, pdf_filepath)
         
         # Clean up temporary files
         shutil.rmtree(temp_dir)
