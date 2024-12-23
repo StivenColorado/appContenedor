@@ -250,48 +250,54 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
         'products': {}
     }
     
+    # Diferentes tamaños para imágenes de cabecera y productos
+    HEADER_IMAGE_WIDTH = 200  # Aumentado para imágenes de cabecera
+    HEADER_IMAGE_HEIGHT = 200  # Aumentado para imágenes de cabecera
+    PRODUCT_IMAGE_WIDTH = 90  # Tamaño original para imágenes de productos
+    PRODUCT_IMAGE_HEIGHT = 90  # Tamaño original para imágenes de productos
+    
     for sheet in workbook.worksheets:
         for image in sheet._images:
             img_cell = f"{image.anchor._from.col}_{image.anchor._from.row}"
             img_path = os.path.join(temp_dir, f"image_{img_cell}.png")
             
             try:
-                # Extraer y redimensionar la imagen
                 image_data = image.ref
                 pil_image = PILImage.open(io.BytesIO(image_data.getvalue()))
                 
+                # Determinar dimensiones basadas en la posición de la imagen
+                if image.anchor._from.row <= header_row:
+                    target_width = HEADER_IMAGE_WIDTH
+                    target_height = HEADER_IMAGE_HEIGHT
+                else:
+                    target_width = PRODUCT_IMAGE_WIDTH
+                    target_height = PRODUCT_IMAGE_HEIGHT
+                
                 # Redimensionar la imagen manteniendo la proporción
-                pil_image.thumbnail((IMAGE_WIDTH, IMAGE_HEIGHT), PILImage.Resampling.LANCZOS)
+                pil_image.thumbnail((target_width, target_height), PILImage.Resampling.LANCZOS)
                 
-                # Crear una nueva imagen con fondo transparente
-                new_image = PILImage.new('RGBA', (IMAGE_WIDTH, IMAGE_HEIGHT), (255, 255, 255, 0))
+                # Crear nueva imagen con fondo transparente
+                new_image = PILImage.new('RGBA', (target_width, target_height), (255, 255, 255, 0))
                 
-                # Calcular posición para centrar la imagen
-                x = (IMAGE_WIDTH - pil_image.width) // 2
-                y = (IMAGE_HEIGHT - pil_image.height) // 2
-                
-                # Pegar la imagen redimensionada en el centro
+                # Centrar la imagen
+                x = (target_width - pil_image.width) // 2
+                y = (target_height - pil_image.height) // 2
                 new_image.paste(pil_image, (x, y))
-                
-                # Guardar la imagen procesada
                 new_image.save(img_path, 'PNG')
                 
                 row_index = image.anchor._from.row
-                
-                # Guardar información de la imagen con su posición original
                 image_info = {
                     'path': img_path,
                     'original_row': row_index,
-                    'original_col': image.anchor._from.col
+                    'original_col': image.anchor._from.col,
+                    'width': target_width,
+                    'height': target_height
                 }
                 
-                # Clasificar la imagen manteniendo el índice original
                 if row_index <= header_row:
                     images_info['header'].append(image_info)
                 else:
                     images_info['products'][row_index] = image_info
-                
-                logging.debug(f"Processed image at row {row_index}, col {image.anchor._from.col}")
                 
             except Exception as e:
                 logging.error(f"Failed to process image {img_cell}: {str(e)}")
@@ -299,96 +305,92 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
     return images_info
 
 def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row):
-    """
-    Procesa el Excel para una marca específica, manejando datos e imágenes simultáneamente
-    """
     filename = f"MARCA_{marca}_{consolidado}-{year}.xlsx"
     filepath = os.path.join(output_path, filename)
     
-    # Crear un nuevo libro de Excel
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = 'Datos'
     
-    # Configurar encabezados
+    # Ajustar dimensiones para imágenes de cabecera
+    for i in range(1, 6):  # Filas 1-5
+        worksheet.row_dimensions[i].height = 150  # Altura aumentada para cabecera
+    
+    # Copiar imágenes de cabecera
+    for header_img in images_info['header']:
+        try:
+            img = Image(header_img['path'])
+            cell_address = f"{get_column_letter(header_img['original_col'] + 1)}{header_img['original_row'] + 1}"
+            worksheet.add_image(img, cell_address)
+            
+            # Ajustar ancho de columna para imágenes de cabecera
+            worksheet.column_dimensions[get_column_letter(header_img['original_col'] + 1)].width = 30
+        except Exception as e:
+            logging.error(f"Failed to add header image: {str(e)}")
+    
+    # Escribir encabezados en fila 6
     for col_idx, column_name in enumerate(brand_df.columns, 1):
-        cell = worksheet.cell(row=EXCEL_START_ROW, column=col_idx)
+        cell = worksheet.cell(row=6, column=col_idx)
         cell.value = column_name
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center', vertical='center')
-        
-        # Ajustar ancho de columna
         worksheet.column_dimensions[get_column_letter(col_idx)].width = 15
     
-    # Encontrar la columna de imágenes de producto
-    product_pic_col = None
-    for idx, col in enumerate(brand_df.columns):
-        if 'PRODUCT PICTURE' in str(col).upper():
-            product_pic_col = idx + 1
-            worksheet.column_dimensions[get_column_letter(product_pic_col)].width = 15
-            break
-    
-    # Procesar cada fila del DataFrame
+    # Escribir datos comenzando en fila 7
+    current_row = 7
     for df_idx, row in brand_df.iterrows():
-        excel_row = EXCEL_START_ROW + df_idx  # Ajuste para que los datos se escriban justo debajo de los encabezados
-        original_row = start_row + df_idx
-        
-        # Escribir datos de la fila
+        # Escribir datos
         for col_idx, value in enumerate(row, 1):
-            cell = worksheet.cell(row=excel_row, column=col_idx)
+            cell = worksheet.cell(row=current_row, column=col_idx)
             cell.value = value
             cell.alignment = Alignment(horizontal='center', vertical='center')
         
-        # Ajustar altura de la fila para las imágenes
-        worksheet.row_dimensions[excel_row].height = 70
+        # Ajustar altura para fila de datos
+        worksheet.row_dimensions[current_row].height = 70
         
-        # Agregar imagen si existe
-        if product_pic_col and original_row in images_info['products']:
-            try:
-                img_info = images_info['products'][original_row]
-                img = Image(img_info['path'])
-                
-                # Calcular la celda destino para la imagen
-                cell_address = f"{get_column_letter(product_pic_col)}{excel_row}"
-                
-                # Añadir imagen manteniendo el tamaño uniforme
-                worksheet.add_image(img, cell_address)
-                logging.debug(f"Added image to {cell_address}")
-            except Exception as e:
-                logging.error(f"Failed to add image for row {excel_row}: {str(e)}")
+        # Agregar imagen de producto si existe
+        if start_row + df_idx in images_info['products']:
+            img_info = images_info['products'][start_row + df_idx]
+            product_pic_col = next((i for i, col in enumerate(brand_df.columns, 1) 
+                                  if 'PRODUCT PICTURE' in str(col).upper()), None)
+            if product_pic_col:
+                try:
+                    img = Image(img_info['path'])
+                    cell_address = f"{get_column_letter(product_pic_col)}{current_row}"
+                    worksheet.add_image(img, cell_address)
+                except Exception as e:
+                    logging.error(f"Failed to add product image for row {current_row}: {str(e)}")
+        
+        current_row += 1
     
-    # Agregar fórmulas de suma al final
-    total_row = EXCEL_START_ROW + len(brand_df)
+    # Agregar fila de totales
+    total_row = current_row
+    add_totals_row(worksheet, brand_df, total_row)
     
-    # Identificar columnas numéricas para las sumas
-    numeric_columns = []
-    for col_idx, col_name in enumerate(brand_df.columns, 1):
-        if any(keyword in str(col_name).upper() for keyword in ['CTNS', 'CBM', 'WEIGHT', 'TOTAL']):
-            col_letter = get_column_letter(col_idx)
-            start_cell = f"{col_letter}{EXCEL_START_ROW}"
-            end_cell = f"{col_letter}{total_row - 1}"
-            
-            # Agregar fórmula de suma
-            sum_cell = worksheet.cell(row=total_row, column=col_idx)
-            sum_cell.value = f"=SUM({start_cell}:{end_cell})"
-            sum_cell.font = Font(bold=True)
-            sum_cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-            
-            numeric_columns.append(col_idx)
-    
-    # Agregar etiqueta "TOTAL" en la primera columna de la fila de totales
-    total_label = worksheet.cell(row=total_row, column=1)
-    total_label.value = "TOTAL"
-    total_label.font = Font(bold=True)
-    total_label.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-    
-    # Guardar el archivo
     try:
         workbook.save(filepath)
         logging.debug(f"Successfully saved file: {filepath}")
     except Exception as e:
         logging.error(f"Failed to save file {filepath}: {str(e)}")
         raise
+
+def add_totals_row(worksheet, brand_df, total_row):
+    """Helper function to add totals row"""
+    for col_idx, col_name in enumerate(brand_df.columns, 1):
+        if any(keyword in str(col_name).upper() for keyword in ['CTNS', 'CBM', 'WEIGHT', 'TOTAL']):
+            col_letter = get_column_letter(col_idx)
+            start_cell = f"{col_letter}7"  # Comenzar desde fila 7
+            end_cell = f"{col_letter}{total_row - 1}"
+            
+            sum_cell = worksheet.cell(row=total_row, column=col_idx)
+            sum_cell.value = f"=SUM({start_cell}:{end_cell})"
+            sum_cell.font = Font(bold=True)
+            sum_cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+    
+    total_label = worksheet.cell(row=total_row, column=1)
+    total_label.value = "TOTAL"
+    total_label.font = Font(bold=True)
+    total_label.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
     
 def process_excel(input_path, output_path, consolidado):
     try:
