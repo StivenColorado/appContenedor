@@ -24,6 +24,8 @@ logging.basicConfig(level=logging.DEBUG)
 # Constantes para el tamaño de las imágenes
 IMAGE_WIDTH = 90  # Ancho en píxeles
 IMAGE_HEIGHT = 90  # Alto en píxeles
+HEADER_IMAGE_WIDTH = 200  # Ancho en píxeles para imágenes de cabecera
+HEADER_IMAGE_HEIGHT = 200  # Alto en píxeles para imágenes de cabecera
 EXCEL_START_ROW = 6  # Fila donde comenzarán las imágenes
 
 class ExcelProcessorApp:
@@ -242,15 +244,13 @@ def find_brand_column(df):
     return None
 
 def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
+    """
+    Extrae y guarda las imágenes con tamaño uniforme
+    """
     images_info = {
         'header': [],
         'products': {}
     }
-    
-    HEADER_IMAGE_WIDTH = 400
-    HEADER_IMAGE_HEIGHT = 400
-    PRODUCT_IMAGE_WIDTH = 90
-    PRODUCT_IMAGE_HEIGHT = 90
     
     for sheet in workbook.worksheets:
         for image in sheet._images:
@@ -258,32 +258,46 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
             img_path = os.path.join(temp_dir, f"image_{img_cell}.png")
             
             try:
+                # Extraer y redimensionar la imagen
                 image_data = image.ref
                 pil_image = PILImage.open(io.BytesIO(image_data.getvalue()))
                 
-                target_width = HEADER_IMAGE_WIDTH if image.anchor._from.row <= header_row else PRODUCT_IMAGE_WIDTH
-                target_height = HEADER_IMAGE_HEIGHT if image.anchor._from.row <= header_row else PRODUCT_IMAGE_HEIGHT
+                # Redimensionar la imagen manteniendo la proporción
+                if image.anchor._from.row <= header_row:
+                    pil_image.thumbnail((HEADER_IMAGE_WIDTH, HEADER_IMAGE_HEIGHT), PILImage.Resampling.LANCZOS)
+                else:
+                    pil_image.thumbnail((IMAGE_WIDTH, IMAGE_HEIGHT), PILImage.Resampling.LANCZOS)
                 
-                pil_image.thumbnail((target_width, target_height), PILImage.Resampling.LANCZOS)
-                new_image = PILImage.new('RGBA', (target_width, target_height), (255, 255, 255, 0))
+                # Crear una nueva imagen con fondo blanco del tamaño exacto deseado
+                new_image = PILImage.new('RGBA', (pil_image.width, pil_image.height), (255, 255, 255, 0))
                 
-                x = (target_width - pil_image.width) // 2
-                y = (target_height - pil_image.height) // 2
+                # Calcular posición para centrar la imagen
+                x = (new_image.width - pil_image.width) // 2
+                y = (new_image.height - pil_image.height) // 2
+                
+                # Pegar la imagen redimensionada en el centro
                 new_image.paste(pil_image, (x, y))
+                
+                # Guardar la imagen procesada
                 new_image.save(img_path, 'PNG')
                 
-                row_index = image.anchor._from.row
+                # Guardar información de la imagen
                 image_info = {
                     'path': img_path,
-                    'original_row': row_index,
-                    'original_col': image.anchor._from.col
+                    'row': image.anchor._from.row,
+                    'col': image.anchor._from.col,
+                    'width': new_image.width,
+                    'height': new_image.height
                 }
                 
-                if row_index <= header_row:
+                # Clasificar la imagen
+                if image.anchor._from.row <= header_row:
                     images_info['header'].append(image_info)
                 else:
-                    images_info['products'][row_index] = image_info
+                    images_info['products'][image.anchor._from.row] = image_info
                 
+                logging.debug(f"Processed image at row {image.anchor._from.row}, col {image.anchor._from.col}")
+            
             except Exception as e:
                 logging.error(f"Failed to process image {img_cell}: {str(e)}")
     
@@ -299,23 +313,35 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
     
     # Set header row heights
     for i in range(1, 6):
-        ws.row_dimensions[i].height = 80
+        ws.row_dimensions[i].height = 15  # Reducir el alto de las filas de la 1 a la 5
     
     # Add header images
-    for header_img in images_info['header']:
+    header_positions = [
+        (1.94, 0.17, 9.69, 4.07),
+        (69.79, 0.50, 4.56, 2.98),
+        (75.35, 0.55, 4.91, 2.78),
+        (81.30, 0.57, 3.09, 2.78)
+    ]
+    for idx, header_img in enumerate(images_info['header']):
         try:
             img = Image(header_img['path'])
-            cell_address = f"{get_column_letter(header_img['original_col'] + 1)}{header_img['original_row'] + 1}"
-            ws.add_image(img, cell_address)
-            ws.column_dimensions[get_column_letter(header_img['original_col'] + 1)].width = 50
+            img.width, img.height = header_positions[idx][2] * 37.795275591, header_positions[idx][3] * 37.795275591  # Convert cm to pixels
+            img.anchor = f"{get_column_letter(header_img['col'] + 1)}{header_img['row'] + 1}"
+            ws.add_image(img)
+            ws.column_dimensions[get_column_letter(header_img['col'] + 1)].width = 50
         except Exception as e:
             logging.error(f"Failed to add header image: {str(e)}")
     
     # Add header texts
-    ws.cell(row=3, column=3).value = "PACKING LIST"
-    ws.cell(row=3, column=3).font = Font(bold=True, size=14)
-    ws.cell(row=4, column=3).value = zafiro_number
-    ws.cell(row=4, column=3).font = Font(bold=True, size=14)
+    ws.merge_cells('C2:D2')
+    ws.cell(row=2, column=3).value = "PACKING LIST"
+    ws.cell(row=2, column=3).font = Font(bold=True, size=14)
+    ws.cell(row=2, column=3).alignment = Alignment(horizontal='center')
+    
+    ws.merge_cells('E2:F2')
+    ws.cell(row=2, column=5).value = zafiro_number
+    ws.cell(row=2, column=5).font = Font(bold=True, size=14)
+    ws.cell(row=2, column=5).alignment = Alignment(horizontal='center')
     
     # Write column headers
     for col_idx, column_name in enumerate(brand_df.columns, 1):
@@ -324,6 +350,7 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center')
         ws.column_dimensions[get_column_letter(col_idx)].width = 15
+        cell.fill = PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid")  # Color azul
     
     # Write data
     current_row = 7
@@ -366,6 +393,7 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
             sum_cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
     
     wb.save(filepath)
+
 def add_totals_row(worksheet, brand_df, total_row):
     """Helper function to add totals row"""
     for col_idx, col_name in enumerate(brand_df.columns, 1):
@@ -383,14 +411,13 @@ def add_totals_row(worksheet, brand_df, total_row):
     total_label.value = "TOTAL"
     total_label.font = Font(bold=True)
     total_label.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-    
+
 def process_excel(input_path, output_path, consolidado):
     temp_dir = tempfile.mkdtemp()
     try:
         workbook = load_workbook(input_path)
-        
-        # Find header text and ZAFIRO number
         df_temp = pd.read_excel(input_path, header=None)
+        
         zafiro_number = None
         for idx, row in df_temp.iterrows():
             row_text = ' '.join(str(val) for val in row if pd.notna(val))
@@ -407,33 +434,141 @@ def process_excel(input_path, output_path, consolidado):
         df = pd.read_excel(input_path, header=header_row)
         df.columns = df.columns.str.strip()
         
-        # Remove unwanted columns
         columns_to_remove = ['UNIT PRICE (RMB)', '单价', 'AMOUNT (RMB)', '总金额']
         df = df.drop(columns=[col for col in df.columns if any(unwanted in col for unwanted in columns_to_remove)], errors='ignore')
-        
-        # Remove unnamed columns
-        # df = df.loc[:, ~df.columns.str.contains('Unnamed', case=False)]
+        df = df.loc[:, ~df.columns.str.contains('Unnamed', case=False)]
         
         marca_col = find_brand_column(df)
         if marca_col is None:
             raise ValueError("No se encontró la columna de marca del producto")
         
-        # Create results file
-        results_path = os.path.join(output_path, f"RESULTADOS_{consolidado}.xlsx")
-        create_results_file(df, results_path, marca_col)
+        # Create results files
+        year = str(datetime.now().year)[-2:]
+        results_basename = f"RESULTADOS_CONS_{consolidado}_{year}"
+        results_excel = os.path.join(output_path, f"{results_basename}.xlsx")
+        results_pdf = os.path.join(output_path, f"{results_basename}.pdf")
         
-        # Process individual brand files
+        # Modificado para pasar solo 3 argumentos
+        create_results_file(df, results_excel, marca_col)
+        create_pdf_results(results_excel, results_pdf)
+        
         df[marca_col] = df[marca_col].astype(str).str.strip().str.upper()
         for marca in df[marca_col].unique():
             if pd.notna(marca) and marca.strip():
                 brand_df = df[df[marca_col] == marca].copy()
-                process_brand_excel(brand_df, output_path, marca, 
-                                 str(datetime.now().year)[-2:],
+                process_brand_excel(brand_df, output_path, marca, year,
                                  consolidado, images_info, header_row + 1,
                                  zafiro_number)
-        
     finally:
         shutil.rmtree(temp_dir)
+
+def create_pdf_results(excel_path, pdf_path):
+    """
+    Creates a simple but robust PDF with table from Excel data.
+    Uses basic FPDF functionality that works across all systems.
+    """
+    try:
+        # Cargar el archivo de Excel y la hoja de resultados
+        workbook = load_workbook(excel_path, data_only=True)  # "data_only" evalúa los valores en lugar de fórmulas
+        sheet = workbook['RESULTADOS']
+        
+        pdf = FPDF()
+        pdf.add_page()
+        
+        # Usar fuente incorporada
+        pdf.set_font('Arial', size=12)
+        
+        # Configuración de la tabla
+        col_widths = [60, 40, 45, 45]  # Anchos de columna ajustados
+        row_height = 10
+        page_width = sum(col_widths)
+        
+        # Título
+        pdf.cell(page_width, row_height, "RESULTADOS", 0, 1, 'C')
+        pdf.ln(5)
+        
+        # Encabezados con fondo gris
+        pdf.set_fill_color(200, 200, 200)
+        for row in range(1, sheet.max_row + 1):
+            for col, width in enumerate(col_widths, 1):
+                # Obtener valor de la celda evaluada
+                cell = sheet.cell(row=row, column=col)
+                value = cell.value
+                
+                # Si es la fila de "TOTAL", recalcular manualmente si es necesario
+                if row > 1 and sheet.cell(row=row, column=1).value and str(sheet.cell(row=row, column=1).value).upper() == "TOTAL":
+                    if col > 1:  # Para columnas numéricas, calcular la suma manualmente
+                        value = sum(
+                            (sheet.cell(r, col).value or 0) for r in range(2, row)
+                            if isinstance(sheet.cell(r, col).value, (int, float))
+                        )
+                
+                # Verificar si es calculable y convertirlo si es necesario
+                if isinstance(value, (int, float)):
+                    value = f"{value:,.2f}" if isinstance(value, float) else str(value)
+                elif value is None:
+                    value = ""
+                elif isinstance(value, str):
+                    value = value.strip()
+                
+                # Asegurar compatibilidad con latin-1
+                if isinstance(value, str):
+                    value = value.encode('latin-1', 'replace').decode('latin-1')
+                
+                # Determinar si es encabezado o TOTAL
+                is_header = (row == 1)
+                is_total = (str(sheet.cell(row, 1).value).upper() == "TOTAL")
+                
+                # Configurar estilo
+                if is_header or is_total:
+                    pdf.set_font('Arial', 'B', 12)
+                else:
+                    pdf.set_font('Arial', '', 12)
+                
+                # Dibujar celda
+                pdf.cell(
+                    width,                     # ancho
+                    row_height,               # alto
+                    value,                    # texto
+                    1,                        # borde
+                    0,                        # sin salto de línea
+                    'C',                      # centrado
+                    is_header                 # relleno solo para encabezados
+                )
+            pdf.ln()  # Nueva línea después de cada fila
+        
+        pdf.output(pdf_path)
+        
+    except Exception as e:
+        logging.error(f"Error creating PDF: {str(e)}")
+        messagebox.showerror("Error", f"Error al crear el PDF: {str(e)}")
+        raise
+
+def cleanup_text_for_pdf(text):
+    """
+    Helper function to clean up text for PDF creation.
+    Removes or replaces problematic characters.
+    """
+    if not isinstance(text, str):
+        text = str(text)
+    
+    # Replace problematic characters
+    replacements = {
+        '¥': 'Y',
+        '£': 'L',
+        '€': 'E',
+        '°': 'o',
+        '±': '+/-',
+        '×': 'x',
+        '÷': '/',
+        # Add more replacements as needed
+    }
+    
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    
+    # Remove any remaining non-CP1252 characters
+    return ''.join(char for char in text if ord(char) < 256)
 
 def create_results_file(df, output_path, marca_col):
     results_columns = ['SHIPPING MARK MARCA', 'CTNS', 'T/CBM', 'T/WEIGHT (KG)']
@@ -475,19 +610,6 @@ def create_results_file(df, output_path, marca_col):
         ws.cell(row=total_row, column=col_idx).font = Font(bold=True)
     
     wb.save(output_path)
-def create_pdf_from_excel(excel_path, pdf_path):
-    workbook = load_workbook(excel_path)
-    sheet = workbook['RESULTADOS']
-    
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=10)
-    
-    for row in sheet.iter_rows(values_only=True):
-        row_data = [str(cell) if cell is not None else '' for cell in row]
-        pdf.cell(200, 10, txt=" | ".join(row_data).encode('latin-1', 'replace').decode('latin-1'), ln=True)
-    
-    pdf.output(pdf_path)
 
 def resize_image(image_path, max_width, max_height):
     """
@@ -537,67 +659,29 @@ def clean_and_validate_brands(df, marca_col):
     df[marca_col] = df[marca_col].replace(r'[^\w\s]', '', regex=True)
     
     return df
-def extract_and_save_images(workbook, temp_dir, header_row):
-    """
-    Extrae y guarda las imágenes con tamaño uniforme y posicionamiento correcto
-    """
-    images_info = {
-        'header': [],
-        'products': {}
-    }
-    
-    # Constante para el offset vertical inicial (5 filas)
-    VERTICAL_OFFSET = 5
-    
-    for sheet in workbook.worksheets:
-        for image in sheet._images:
-            img_cell = f"{image.anchor._from.col}_{image.anchor._from.row}"
-            img_path = os.path.join(temp_dir, f"image_{img_cell}.png")
-            
+def extract_and_save_images(df, image_col, output_folder, marca):
+    image_folder = os.path.join(output_folder, f"{marca}_imagenes")
+    os.makedirs(image_folder, exist_ok=True)
+
+    for i, row in df.iterrows():
+        # Obtener el nombre de la imagen
+        image_data = row[image_col]
+        
+        # Verificar si hay datos de imagen en la columna
+        if isinstance(image_data, bytes):
             try:
-                # Extraer y redimensionar la imagen
-                image_data = image.ref
-                pil_image = PILImage.open(io.BytesIO(image_data.getvalue()))
+                # Cargar imagen desde los bytes
+                image = PILImage.open(BytesIO(image_data))
                 
-                # Redimensionar la imagen manteniendo la proporción
-                pil_image.thumbnail((IMAGE_WIDTH, IMAGE_HEIGHT), PILImage.Resampling.LANCZOS)
+                # Crear nombre de archivo para la imagen
+                image_name = f"{marca}_{i+1}.png"
+                image_path = os.path.join(output_folder, image_name)
                 
-                # Crear una nueva imagen con fondo blanco del tamaño exacto deseado
-                new_image = PILImage.new('RGBA', (IMAGE_WIDTH, IMAGE_HEIGHT), (255, 255, 255, 0))
-                
-                # Calcular posición para centrar la imagen
-                x = (IMAGE_WIDTH - pil_image.width) // 2
-                y = (IMAGE_HEIGHT - pil_image.height) // 2
-                
-                # Pegar la imagen redimensionada en el centro
-                new_image.paste(pil_image, (x, y))
-                
-                # Guardar la imagen procesada
-                new_image.save(img_path, 'PNG')
-                
-                # Guardar información de la imagen con posición ajustada
-                image_info = {
-                    'path': img_path,
-                    'row': image.anchor._from.row,
-                    'col': image.anchor._from.col,
-                    'width': IMAGE_WIDTH,
-                    'height': IMAGE_HEIGHT
-                }
-                
-                # Clasificar la imagen y ajustar posición vertical
-                if image.anchor._from.row <= header_row:
-                    images_info['header'].append(image_info)
-                else:
-                    # Ajustar la posición vertical para las imágenes de productos
-                    adjusted_row = VERTICAL_OFFSET + (image.anchor._from.row - header_row)
-                    images_info['products'][adjusted_row] = image_info
-                
-                logging.debug(f"Processed image at adjusted row {adjusted_row if 'adjusted_row' in locals() else image.anchor._from.row}, col {image.anchor._from.col}")
-            
+                # Guardar la imagen
+                image.save(image_path)
+                print(f"Imagen guardada: {image_path}")
             except Exception as e:
-                logging.error(f"Failed to process image {img_cell}: {str(e)}")
-    
-    return images_info
+                print(f"Error al procesar la imagen de la fila {i+1}: {e}")
 
 def main():
     root = tk.Tk()
