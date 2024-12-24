@@ -17,6 +17,8 @@ from fpdf import FPDF
 import re
 import time
 import copy
+from PIL import JpegImagePlugin
+JpegImagePlugin._getmp = lambda: None
 # Suppress Tkinter deprecation warning
 os.environ['TK_SILENCE_DEPRECATION'] = '1'
 # Configuración de logging
@@ -333,13 +335,15 @@ def find_brand_column(df):
     return None
 
 def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
-    """
-    Extrae y guarda las imágenes con tamaño uniforme
-    """
     images_info = {
         'header': [],
         'products': {}
     }
+    
+    HEADER_IMAGE_WIDTH = 400
+    HEADER_IMAGE_HEIGHT = 400
+    PRODUCT_IMAGE_WIDTH = 90
+    PRODUCT_IMAGE_HEIGHT = 90
     
     for sheet in workbook.worksheets:
         for image in sheet._images:
@@ -347,51 +351,36 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
             img_path = os.path.join(temp_dir, f"image_{img_cell}.png")
             
             try:
-                # Extraer y redimensionar la imagen
                 image_data = image.ref
                 pil_image = PILImage.open(io.BytesIO(image_data.getvalue()))
                 
-                # Redimensionar la imagen manteniendo la proporción
-                if image.anchor._from.row <= header_row:
-                    pil_image.thumbnail((HEADER_IMAGE_WIDTH, HEADER_IMAGE_HEIGHT), PILImage.Resampling.LANCZOS)
-                else:
-                    pil_image.thumbnail((IMAGE_WIDTH, IMAGE_HEIGHT), PILImage.Resampling.LANCZOS)
+                target_width = HEADER_IMAGE_WIDTH if image.anchor._from.row <= header_row else PRODUCT_IMAGE_WIDTH
+                target_height = HEADER_IMAGE_HEIGHT if image.anchor._from.row <= header_row else PRODUCT_IMAGE_HEIGHT
                 
-                # Crear una nueva imagen con fondo blanco del tamaño exacto deseado
-                new_image = PILImage.new('RGBA', (pil_image.width, pil_image.height), (255, 255, 255, 0))
+                pil_image.thumbnail((target_width, target_height), PILImage.Resampling.LANCZOS)
+                new_image = PILImage.new('RGBA', (target_width, target_height), (255, 255, 255, 0))
                 
-                # Calcular posición para centrar la imagen
-                x = (new_image.width - pil_image.width) // 2
-                y = (new_image.height - pil_image.height) // 2
-                
-                # Pegar la imagen redimensionada en el centro
+                x = (target_width - pil_image.width) // 2
+                y = (target_height - pil_image.height) // 2
                 new_image.paste(pil_image, (x, y))
-                
-                # Guardar la imagen procesada
                 new_image.save(img_path, 'PNG')
                 
-                # Guardar información de la imagen
+                row_index = image.anchor._from.row
                 image_info = {
                     'path': img_path,
-                    'row': image.anchor._from.row,
-                    'col': image.anchor._from.col,
-                    'width': new_image.width,
-                    'height': new_image.height
+                    'original_row': row_index,
+                    'original_col': image.anchor._from.col
                 }
                 
-                # Clasificar la imagen
-                if image.anchor._from.row <= header_row:
+                if row_index <= header_row:
                     images_info['header'].append(image_info)
                 else:
-                    images_info['products'][image.anchor._from.row] = image_info
+                    images_info['products'][row_index] = image_info
                 
-                logging.debug(f"Processed image at row {image.anchor._from.row}, col {image.anchor._from.col}")
-            
             except Exception as e:
                 logging.error(f"Failed to process image {img_cell}: {str(e)}")
     
     return images_info
-
 def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row, zafiro_number):
     filename = f"MARCA_{marca}_{consolidado}-{year}.xlsx"
     filepath = os.path.join(output_path, filename)
