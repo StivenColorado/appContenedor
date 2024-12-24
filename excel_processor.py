@@ -426,15 +426,15 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
     
     
     # Add header texts
-    ws.merge_cells('C2:D2')
-    ws.cell(row=2, column=3).value = "PACKING LIST"
-    ws.cell(row=2, column=3).font = Font(bold=True, size=14)
-    ws.cell(row=2, column=3).alignment = Alignment(horizontal='center')
-    
-    ws.merge_cells('E2:F2')
-    ws.cell(row=2, column=5).value = zafiro_number
-    ws.cell(row=2, column=5).font = Font(bold=True, size=14, color="FF0000")
-    ws.cell(row=2, column=5).alignment = Alignment(horizontal='center')
+    ws.merge_cells('D2:E3')
+    ws.cell(row=2, column=4).value = "PACKING LIST"
+    ws.cell(row=2, column=4).font = Font(bold=True, size=14)
+    ws.cell(row=2, column=4).alignment = Alignment(horizontal='center')
+
+    ws.merge_cells('G2:H3')
+    ws.cell(row=2, column=7).value = zafiro_number
+    ws.cell(row=2, column=7).font = Font(bold=True, size=14, color="FF0000")
+    ws.cell(row=2, column=7).alignment = Alignment(horizontal='center')
     
     # Write column headers
     for col_idx, column_name in enumerate(brand_df.columns, 1):
