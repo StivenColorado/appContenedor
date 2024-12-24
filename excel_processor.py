@@ -320,7 +320,7 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
         # y, x, height, width
         (1, 19, 6.69, 2.50),  # Esquina superior izquierda, tercera imagen 
         (1, 17, 4.56, 2.50),  # Parte superior derecha, segunda imagen
-        (1, 1, 4.91, 2.50),   # Parte superior derecha, primera imagen
+        (1, 1, 6.91, 2.70),   # Parte superior derecha, primera imagen
         (1, 22, 4.56, 2.50),  # Parte superior derecha, tamaño reducido, cuarta imagen
     ]
     for idx, header_img in enumerate(images_info['header']):
@@ -344,7 +344,7 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
     
     ws.merge_cells('E2:F2')
     ws.cell(row=2, column=5).value = zafiro_number
-    ws.cell(row=2, column=5).font = Font(bold=True, size=14)
+    ws.cell(row=2, column=5).font = Font(bold=True, size=14, color="FF0000")
     ws.cell(row=2, column=5).alignment = Alignment(horizontal='center')
     
     # Write column headers
