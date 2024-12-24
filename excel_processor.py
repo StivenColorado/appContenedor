@@ -15,6 +15,7 @@ import io
 from PIL import Image as PILImage
 from fpdf import FPDF
 import re
+import time
 
 # Suppress Tkinter deprecation warning
 os.environ['TK_SILENCE_DEPRECATION'] = '1'
@@ -28,9 +29,75 @@ HEADER_IMAGE_WIDTH = 200  # Ancho en píxeles para imágenes de cabecera
 HEADER_IMAGE_HEIGHT = 200  # Alto en píxeles para imágenes de cabecera
 EXCEL_START_ROW = 6  # Fila donde comenzarán las imágenes
 
+class LoadingScreen:
+    def __init__(self):
+        self.window = tk.Toplevel()
+        self.window.title("")
+        self.window.overrideredirect(True)  # Elimina los bordes de la ventana
+        
+        # Obtener dimensiones de la pantalla
+        screen_width = self.window.winfo_screenwidth()
+        screen_height = self.window.winfo_screenheight()
+        
+        # Calcular posición para centrar
+        width = 300
+        height = 150
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+        
+        self.window.geometry(f"{width}x{height}+{x}+{y}")
+        self.window.configure(bg='#f0f0f0')
+        
+        # Marco principal
+        main_frame = ttk.Frame(self.window, style='Custom.TFrame')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # Etiqueta de carga
+        self.loading_label = ttk.Label(
+            main_frame,
+            text="Cargando...",
+            font=('Helvetica', 12)
+        )
+        self.loading_label.pack(pady=10)
+        
+        # Barra de progreso
+        self.progress = ttk.Progressbar(
+            main_frame,
+            length=200,
+            mode='determinate'
+        )
+        self.progress.pack(pady=10)
+        
+        # Etiqueta de desarrollador
+        self.dev_label = ttk.Label(
+            main_frame,
+            text="Desarrollado por Stiven Colorado",
+            font=('Helvetica', 10, 'italic')
+        )
+        self.dev_label.pack(pady=10)
+        
+    def update_progress(self, value):
+        self.progress['value'] = value
+        self.window.update()
+    
+    def close(self):
+        self.window.destroy()
+
 class ExcelProcessorApp:
     def __init__(self, root):
         self.root = root
+        
+        # Ocultar la ventana principal temporalmente
+        self.root.withdraw()
+        
+        # Mostrar pantalla de carga
+        loading = LoadingScreen()
+        for i in range(0, 101, 2):
+            loading.update_progress(i)
+            time.sleep(0.06)  # Total ~3 segundos
+        loading.close()
+        # mostrar la pantalla
+        self.root.deiconify()
         self.root.title("Procesador de Excel")
         self.root.geometry("600x450")
         
@@ -141,6 +208,28 @@ class ExcelProcessorApp:
         )
         self.status_label.pack(pady=10)
 
+    def validate_required_columns(self, df):
+        required_columns = ['CTNS', 'T/CBM', 'T/WEIGHT (KG)']
+        missing_columns = []
+        
+        for col in required_columns:
+            found = False
+            for df_col in df.columns:
+                if col in str(df_col).upper():
+                    found = True
+                    break
+            if not found:
+                missing_columns.append(col)
+        
+        if missing_columns:
+            filename = os.path.basename(self.input_path.get())
+            error_msg = f"El archivo '{filename}' no cuenta con las siguientes columnas necesarias para funcionar correctamente:\n\n"
+            error_msg += "\n".join(f"- {col}" for col in missing_columns)
+            error_msg += "\n\nEsto hará imposible mostrar los resultados esperados."
+            messagebox.showerror("Error - Columnas faltantes", error_msg)
+            return False
+        return True
+    
     def select_input_file(self):
         filename = filedialog.askopenfilename(
             title="Seleccionar archivo Excel",
@@ -447,32 +536,24 @@ def process_excel(input_path, output_path, consolidado):
         seen_columns = set()
         
         for col in df.columns:
-            # Ignorar columnas Unnamed
             if 'UNNAMED' in col:
                 continue
-                
-            # Limpiar el nombre de la columna
             clean_col = (col.replace('(', ' ')
                           .replace(')', ' ')
                           .replace('&', ' ')
                           .strip())
-            
-            # Si ya existe una columna similar, usar el nombre existente
             if clean_col in seen_columns:
                 continue
-                
             seen_columns.add(clean_col)
             normalized_columns.append(col)
         
         # Mantener solo las columnas normalizadas
         df = df[normalized_columns]
         
-        # Lista de columnas a eliminar (precios)
+        # Eliminar columnas de precios
         price_columns = [col for col in df.columns 
                         if any(term in col.upper() 
                               for term in ['UNIT PRICE', 'AMOUNT', '单价', '总金额', 'RMB'])]
-        
-        # Eliminar columnas de precios
         df = df.drop(columns=price_columns, errors='ignore')
         
         marca_col = find_brand_column(df)
@@ -485,18 +566,84 @@ def process_excel(input_path, output_path, consolidado):
         results_excel = os.path.join(output_path, f"{results_basename}.xlsx")
         results_pdf = os.path.join(output_path, f"{results_basename}.pdf")
         
-        create_results_file(df, results_excel, marca_col)
+        # Copiar archivo original y agregar hoja de resultados
+        shutil.copy2(input_path, results_excel)
+        with pd.ExcelWriter(results_excel, engine='openpyxl', mode='a') as writer:
+            create_results_sheet(df, writer, marca_col)
+        
+        # Crear PDF solo con la tabla de resultados
         create_pdf_results(results_excel, results_pdf)
         
+        # Procesar archivos por marca
         df[marca_col] = df[marca_col].astype(str).str.strip().str.upper()
+        processed_brands = set()  # Para evitar duplicados
+        
         for marca in df[marca_col].unique():
-            if pd.notna(marca) and marca.strip():
+            if pd.notna(marca) and marca.strip() and marca not in processed_brands:
+                processed_brands.add(marca)
                 brand_df = df[df[marca_col] == marca].copy()
-                process_brand_excel(brand_df, output_path, marca, year,
-                                 consolidado, images_info, header_row + 1,
-                                 zafiro_number)
+                try:
+                    process_brand_excel(brand_df, output_path, marca, year,
+                                     consolidado, images_info, header_row + 1,
+                                     zafiro_number)
+                    logging.info(f"Archivo creado para marca: {marca}")
+                except Exception as e:
+                    logging.error(f"Error procesando marca {marca}: {str(e)}")
+                    messagebox.showwarning(
+                        "Advertencia",
+                        f"Hubo un error al procesar la marca {marca}. Por favor, verifique el archivo de salida."
+                    )
+        
+        # Mostrar resumen de procesamiento
+        messagebox.showinfo(
+            "Proceso Completado",
+            f"Se han procesado:\n"
+            f"- Archivo de resultados general\n"
+            f"- PDF de resultados\n"
+            f"- {len(processed_brands)} archivos de marca"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error en process_excel: {str(e)}")
+        raise
     finally:
-        shutil.rmtree(temp_dir)
+        shutil.rmtree(temp_dir)      
+
+def create_results_sheet(df, writer, marca_col):
+    """
+    Crea la hoja de RESULTADOS en el archivo Excel existente
+    """
+    results_columns = ['SHIPPING MARK MARCA', 'CTNS', 'T/CBM', 'T/WEIGHT (KG)']
+    
+    # Create summary by brand
+    summary = df.groupby(marca_col).agg({
+        'CTNS': 'sum',
+        'T/CBM': 'sum',
+        'T/WEIGHT (KG)': 'sum'
+    }).reset_index()
+    
+    # Write to Excel
+    summary.to_excel(writer, sheet_name='RESULTADOS', index=False)
+    
+    # Get the worksheet to apply formatting
+    workbook = writer.book
+    worksheet = workbook['RESULTADOS']
+    
+    # Format headers
+    for col_idx, col_name in enumerate(results_columns, 1):
+        cell = worksheet.cell(row=1, column=col_idx)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='center')
+    
+    # Add totals row
+    total_row = len(summary) + 2
+    worksheet.cell(row=total_row, column=1, value='TOTAL').font = Font(bold=True)
+    
+    for col_idx, col_name in enumerate(results_columns[1:], 2):
+        col_letter = get_column_letter(col_idx)
+        cell = worksheet.cell(row=total_row, column=col_idx)
+        cell.value = f'=SUM({col_letter}2:{col_letter}{total_row-1})'
+        cell.font = Font(bold=True)
 
 def find_brand_column(df):
     """
