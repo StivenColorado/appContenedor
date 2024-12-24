@@ -317,20 +317,24 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
     
     # Add header images
     header_positions = [
-        (1.94, 0.17, 9.69, 4.07),
-        (69.79, 0.50, 4.56, 2.98),
-        (75.35, 0.55, 4.91, 2.78),
-        (81.30, 0.57, 3.09, 2.78)
+        # y,x,heigh,width
+        (1, 19, 6.69, 3.07),  # Esquina superior izquierda, tercera imagen 
+        (1, 17, 4.56, 2.98),  # Parte superior derecha, segunda imagen
+        (1, 1, 4.91, 2.78),  # Parte superior derecha, primera imagen
+        (1, 22, 4.56, 2.98),  # Parte superior derecha, tamaño reducido, cuarta imagen
     ]
     for idx, header_img in enumerate(images_info['header']):
         try:
             img = Image(header_img['path'])
-            img.width, img.height = header_positions[idx][2] * 37.795275591, header_positions[idx][3] * 37.795275591  # Convert cm to pixels
-            img.anchor = f"{get_column_letter(header_img['col'] + 1)}{header_img['row'] + 1}"
+            img.width = header_positions[idx][2] * 37.795275591  # Convert cm to pixels
+            img.height = header_positions[idx][3] * 37.795275591  # Convert cm to pixels
+            # Set the position of the image
+            cell = ws.cell(row=header_positions[idx][0], column=header_positions[idx][1])
+            img.anchor = cell.coordinate
             ws.add_image(img)
-            ws.column_dimensions[get_column_letter(header_img['col'] + 1)].width = 50
         except Exception as e:
-            logging.error(f"Failed to add header image: {str(e)}")
+            logging.error(f"Failed to process image {header_img['path']}: {str(e)}")
+    
     
     # Add header texts
     ws.merge_cells('C2:D2')
