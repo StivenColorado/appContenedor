@@ -317,11 +317,11 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
     
     # Add header images
     header_positions = [
-        # y,x,heigh,width
-        (1, 19, 6.69, 3.07),  # Esquina superior izquierda, tercera imagen 
-        (1, 17, 4.56, 2.98),  # Parte superior derecha, segunda imagen
-        (1, 1, 4.91, 2.78),  # Parte superior derecha, primera imagen
-        (1, 22, 4.56, 2.98),  # Parte superior derecha, tamaño reducido, cuarta imagen
+        # y, x, height, width
+        (1, 19, 6.69, 2.50),  # Esquina superior izquierda, tercera imagen 
+        (1, 17, 4.56, 2.50),  # Parte superior derecha, segunda imagen
+        (1, 1, 4.91, 2.50),   # Parte superior derecha, primera imagen
+        (1, 22, 4.56, 2.50),  # Parte superior derecha, tamaño reducido, cuarta imagen
     ]
     for idx, header_img in enumerate(images_info['header']):
         try:
