@@ -413,7 +413,6 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
         except Exception as e:
             logging.error(f"Failed to process image {header_img['path']}: {str(e)}")
     
-    
     # Add header texts
     ws.merge_cells('D2:E3')
     ws.cell(row=2, column=4).value = "PACKING LIST"
@@ -450,7 +449,11 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
             if product_pic_col:
                 try:
                     img = Image(images_info['products'][start_row + df_idx]['path'])
+                    img.width = 45  # Ajusta el ancho de la imagen
+                    img.height = 45  # Ajusta el alto de la imagen
                     cell_address = f"{get_column_letter(product_pic_col)}{current_row}"
+                    ws.column_dimensions[get_column_letter(product_pic_col)].width = 25  # Ajusta el ancho de la columna
+                    ws.row_dimensions[current_row].height = 100  # Ajusta el alto de la fila
                     ws.add_image(img, cell_address)
                 except Exception as e:
                     logging.error(f"Failed to add product image for row {current_row}: {str(e)}")
@@ -475,7 +478,6 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
             sum_cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
     
     wb.save(filepath)
-
 def add_totals_row(worksheet, brand_df, total_row):
     """Helper function to add totals row"""
     for col_idx, col_name in enumerate(brand_df.columns, 1):
@@ -558,13 +560,20 @@ def process_excel(input_path, output_path, consolidado):
         # En lugar de copiar directamente, guardamos el DataFrame limpio
         with pd.ExcelWriter(results_excel, engine='openpyxl') as writer:
             # Guardar la hoja principal sin las columnas de precios
-            df.to_excel(writer, index=False, sheet_name='Principal')
+            df.to_excel(writer, index=False, sheet_name='Principal', startrow=5)
             
             # Copiar las imágenes del archivo original a la nueva hoja
             worksheet = writer.book['Principal']
             for image in workbook.active._images:
                 img_copy = copy.deepcopy(image)
                 worksheet.add_image(img_copy)
+            
+            # Aplicar formato a las columnas
+            header_fill = PatternFill(start_color='ADD8E6', end_color='ADD8E6', fill_type='solid')
+            header_font = Font(bold=True)
+            for cell in worksheet[6]:
+                cell.fill = header_fill
+                cell.font = header_font
             
             # Agregar la hoja de resultados
             create_results_sheet(df, writer, marca_col)
@@ -607,11 +616,13 @@ def process_excel(input_path, output_path, consolidado):
     finally:
         shutil.rmtree(temp_dir)
 
+
 def create_results_sheet(df, writer, marca_col):
     """
     Crea la hoja de RESULTADOS en el archivo Excel existente
     """
     results_columns = ['SHIPPING MARK MARCA', 'CTNS', 'T/CBM', 'T/WEIGHT (KG)']
+    new_column_names = ['SHIPPING MARK MARCA', 'CARTONES', 'CUBICAJE', 'PESO']
     
     # Create summary by brand
     summary = df.groupby(marca_col).agg({
@@ -627,9 +638,10 @@ def create_results_sheet(df, writer, marca_col):
     workbook = writer.book
     worksheet = workbook['RESULTADOS']
     
-    # Format headers
-    for col_idx, col_name in enumerate(results_columns, 1):
+    # Format headers and change column names
+    for col_idx, new_col_name in enumerate(new_column_names, 1):
         cell = worksheet.cell(row=1, column=col_idx)
+        cell.value = new_col_name
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center')
     
@@ -637,7 +649,7 @@ def create_results_sheet(df, writer, marca_col):
     total_row = len(summary) + 2
     worksheet.cell(row=total_row, column=1, value='TOTAL').font = Font(bold=True)
     
-    for col_idx, col_name in enumerate(results_columns[1:], 2):
+    for col_idx, col_name in enumerate(new_column_names[1:], 2):
         col_letter = get_column_letter(col_idx)
         cell = worksheet.cell(row=total_row, column=col_idx)
         cell.value = f'=SUM({col_letter}2:{col_letter}{total_row-1})'
@@ -881,3 +893,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
