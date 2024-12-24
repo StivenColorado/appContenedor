@@ -16,7 +16,7 @@ from PIL import Image as PILImage
 from fpdf import FPDF
 import re
 import time
-
+import copy
 # Suppress Tkinter deprecation warning
 os.environ['TK_SILENCE_DEPRECATION'] = '1'
 # Configuración de logging
@@ -550,7 +550,7 @@ def process_excel(input_path, output_path, consolidado):
         # Mantener solo las columnas normalizadas
         df = df[normalized_columns]
         
-        # Eliminar columnas de precios
+        # Identificar columnas de precios para eliminar
         price_columns = [col for col in df.columns 
                         if any(term in col.upper() 
                               for term in ['UNIT PRICE', 'AMOUNT', '单价', '总金额', 'RMB'])]
@@ -566,9 +566,18 @@ def process_excel(input_path, output_path, consolidado):
         results_excel = os.path.join(output_path, f"{results_basename}.xlsx")
         results_pdf = os.path.join(output_path, f"{results_basename}.pdf")
         
-        # Copiar archivo original y agregar hoja de resultados
-        shutil.copy2(input_path, results_excel)
-        with pd.ExcelWriter(results_excel, engine='openpyxl', mode='a') as writer:
+        # En lugar de copiar directamente, guardamos el DataFrame limpio
+        with pd.ExcelWriter(results_excel, engine='openpyxl') as writer:
+            # Guardar la hoja principal sin las columnas de precios
+            df.to_excel(writer, index=False, sheet_name='Principal')
+            
+            # Copiar las imágenes del archivo original a la nueva hoja
+            worksheet = writer.book['Principal']
+            for image in workbook.active._images:
+                img_copy = copy.deepcopy(image)
+                worksheet.add_image(img_copy)
+            
+            # Agregar la hoja de resultados
             create_results_sheet(df, writer, marca_col)
         
         # Crear PDF solo con la tabla de resultados
@@ -576,7 +585,7 @@ def process_excel(input_path, output_path, consolidado):
         
         # Procesar archivos por marca
         df[marca_col] = df[marca_col].astype(str).str.strip().str.upper()
-        processed_brands = set()  # Para evitar duplicados
+        processed_brands = set()
         
         for marca in df[marca_col].unique():
             if pd.notna(marca) and marca.strip() and marca not in processed_brands:
@@ -607,7 +616,7 @@ def process_excel(input_path, output_path, consolidado):
         logging.error(f"Error en process_excel: {str(e)}")
         raise
     finally:
-        shutil.rmtree(temp_dir)      
+        shutil.rmtree(temp_dir)
 
 def create_results_sheet(df, writer, marca_col):
     """
