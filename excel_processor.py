@@ -422,6 +422,7 @@ def process_excel(input_path, output_path, consolidado):
         workbook = load_workbook(input_path)
         df_temp = pd.read_excel(input_path, header=None)
         
+        # Buscar ZAFIRO number
         zafiro_number = None
         for idx, row in df_temp.iterrows():
             row_text = ' '.join(str(val) for val in row if pd.notna(val))
@@ -435,12 +436,44 @@ def process_excel(input_path, output_path, consolidado):
         
         images_info = extract_and_save_images_from_workbook(workbook, temp_dir, header_row)
         
+        # Leer el DataFrame con los encabezados correctos
         df = pd.read_excel(input_path, header=header_row)
-        df.columns = df.columns.str.strip()
         
-        columns_to_remove = ['UNIT PRICE (RMB)', '单价', 'AMOUNT (RMB)', '总金额']
-        df = df.drop(columns=[col for col in df.columns if any(unwanted in col for unwanted in columns_to_remove)], errors='ignore')
-        df = df.loc[:, ~df.columns.str.contains('Unnamed', case=False)]
+        # Limpiar y normalizar nombres de columnas
+        df.columns = df.columns.str.strip().str.upper()
+        
+        # Eliminar columnas Unnamed y normalizar nombres
+        normalized_columns = []
+        seen_columns = set()
+        
+        for col in df.columns:
+            # Ignorar columnas Unnamed
+            if 'UNNAMED' in col:
+                continue
+                
+            # Limpiar el nombre de la columna
+            clean_col = (col.replace('(', ' ')
+                          .replace(')', ' ')
+                          .replace('&', ' ')
+                          .strip())
+            
+            # Si ya existe una columna similar, usar el nombre existente
+            if clean_col in seen_columns:
+                continue
+                
+            seen_columns.add(clean_col)
+            normalized_columns.append(col)
+        
+        # Mantener solo las columnas normalizadas
+        df = df[normalized_columns]
+        
+        # Lista de columnas a eliminar (precios)
+        price_columns = [col for col in df.columns 
+                        if any(term in col.upper() 
+                              for term in ['UNIT PRICE', 'AMOUNT', '单价', '总金额', 'RMB'])]
+        
+        # Eliminar columnas de precios
+        df = df.drop(columns=price_columns, errors='ignore')
         
         marca_col = find_brand_column(df)
         if marca_col is None:
@@ -452,7 +485,6 @@ def process_excel(input_path, output_path, consolidado):
         results_excel = os.path.join(output_path, f"{results_basename}.xlsx")
         results_pdf = os.path.join(output_path, f"{results_basename}.pdf")
         
-        # Modificado para pasar solo 3 argumentos
         create_results_file(df, results_excel, marca_col)
         create_pdf_results(results_excel, results_pdf)
         
@@ -466,6 +498,16 @@ def process_excel(input_path, output_path, consolidado):
     finally:
         shutil.rmtree(temp_dir)
 
+def find_brand_column(df):
+    """
+    Encuentra la columna que contiene la marca del producto
+    """
+    possible_names = ['SHIPPING MARK MARCA', 'MARCA DEL PRODUCTO', 'MARCA']
+    for col in df.columns:
+        col_upper = str(col).upper()
+        if any(name in col_upper for name in possible_names):
+            return col
+    return None
 def create_pdf_results(excel_path, pdf_path):
     """
     Creates a simple but robust PDF with table from Excel data.
