@@ -419,6 +419,8 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
     
     return images_info
 def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row, zafiro_number):
+    if 'ANOTACION' in brand_df.columns:
+        brand_df = brand_df.drop('ANOTACION', axis=1)
     filename = f"MARCA_{marca}_CONSO_{consolidado}-{year}.xlsx"
     filepath = os.path.join(output_path, filename)
     
@@ -611,17 +613,25 @@ def validate_and_normalize_brands(df, marca_col):
 
 def add_annotation_column(df):
     """
-    Agrega una columna de anotaciones al DataFrame indicando si hay registros sin información.
+    Agrega una columna de anotaciones al DataFrame solo para el archivo de resultados.
     """
-    def check_row(row):
-        # Verificar si hay valores nulos o ceros en las columnas relevantes
+    def check_brand_records(group):
+        # Verifica si algún registro de la marca tiene valores nulos o ceros
         relevant_columns = ['CTNS', 'T/CBM', 'T/WEIGHT (KG)']
-        for col in relevant_columns:
-            if pd.isnull(row[col]) or row[col] == 0:
-                return 'hay registros sin informacion'
-        return ''
-    
-    df['ANOTACION'] = df.apply(check_row, axis=1)
+        has_missing = False
+        for _, row in group.iterrows():
+            for col in relevant_columns:
+                if pd.isnull(row[col]) or row[col] == 0:
+                    has_missing = True
+                    break
+            if has_missing:
+                break
+        return 'hay registros sin informacion' if has_missing else ''
+
+    # Agregar anotaciones por marca
+    marca_col = [col for col in df.columns if 'MARCA' in col.upper()][0]
+    annotations = df.groupby(marca_col).apply(check_brand_records)
+    df['ANOTACION'] = df[marca_col].map(annotations)
     return df
 
 def process_excel(input_path, output_path, consolidado):
@@ -762,9 +772,8 @@ def process_excel(input_path, output_path, consolidado):
 
 def create_results_sheet(df, writer, marca_col, has_missing_info):
     """
-    Crea la hoja de RESULTADOS en el archivo Excel existente
+    Crea la hoja de RESULTADOS en el archivo Excel
     """
-    results_columns = ['SHIPPING MARK MARCA', 'CTNS', 'T/CBM', 'T/WEIGHT (KG)', 'ANOTACION']
     new_column_names = ['SHIPPING MARK MARCA', 'CARTONES', 'CUBICAJE', 'PESO', 'ANOTACION']
     
     # Create summary by brand
@@ -772,8 +781,11 @@ def create_results_sheet(df, writer, marca_col, has_missing_info):
         'CTNS': 'sum',
         'T/CBM': 'sum',
         'T/WEIGHT (KG)': 'sum',
-        'ANOTACION': 'first'
+        'ANOTACION': 'first'  # Toma la anotación de la marca
     }).reset_index()
+    
+    # Remove null annotations
+    summary.loc[summary['ANOTACION'].isna(), 'ANOTACION'] = ''
     
     # Write to Excel
     summary.to_excel(writer, sheet_name='RESULTADOS', index=False)
@@ -793,16 +805,11 @@ def create_results_sheet(df, writer, marca_col, has_missing_info):
     total_row = len(summary) + 2
     worksheet.cell(row=total_row, column=1, value='TOTAL').font = Font(bold=True)
     
-    for col_idx, col_name in enumerate(new_column_names[1:], 2):
+    for col_idx, col_name in enumerate(new_column_names[1:-1], 2):  # Excluir la columna ANOTACION
         col_letter = get_column_letter(col_idx)
         cell = worksheet.cell(row=total_row, column=col_idx)
         cell.value = f'=SUM({col_letter}2:{col_letter}{total_row-1})'
         cell.font = Font(bold=True)
-    
-    # Add annotation if there are missing information records
-    if has_missing_info:
-        worksheet.cell(row=total_row + 1, column=1, value='hay registros sin informacion').font = Font(bold=True)
-
 def find_brand_column(df):
     """
     Encuentra la columna que contiene la marca del producto
@@ -814,6 +821,67 @@ def find_brand_column(df):
             return col
     return None
 
+def create_pdf_results(excel_path, pdf_path, has_missing_info):
+    try:
+        workbook = load_workbook(excel_path, data_only=True)
+        sheet = workbook['Principal']
+        
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font('Arial', size=10)
+        
+        col_widths = [50, 30, 35, 35, 50]
+        row_height = 8
+        page_width = sum(col_widths)
+        
+        pdf.set_font('Arial', 'B', 12)
+        pdf.cell(page_width, 10, 'Resultados', 0, 1, 'C')
+        pdf.ln(10)
+        
+        pdf.set_font('Arial', 'B', 10)
+        headers = ['SHIPPING MARK MARCA', 'CARTONES', 'CUBICAJE', 'PESO', 'ANOTACION']
+        for i, header in enumerate(headers):
+            pdf.cell(col_widths[i], row_height, header, 1, 0, 'C')
+        pdf.ln(row_height)
+
+        pdf.set_font('Arial', '', 10)
+        total_values = [0, 0, 0]
+
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            if row[0] == 'TOTAL':
+                continue
+
+            for idx, value in enumerate(row[1:4]):
+                if value not in (None, 'None'):
+                    try:
+                        total_values[idx] += float(str(value).replace(',', '.'))
+                    except (ValueError, TypeError):
+                        pass
+
+            for i, value in enumerate(row):
+                text = cleanup_text_for_pdf(str(value)) if value not in (None, 'None') else ''
+                pdf.cell(col_widths[i], row_height, text, 1, 0, 'C')
+            pdf.ln(row_height)
+
+        # Format totals with specific formats for each column
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(col_widths[0], row_height, 'TOTAL', 1, 0, 'C')
+        pdf.cell(col_widths[1], row_height, f"{total_values[0]:.0f}", 1, 0, 'C')  # Sin decimales
+        pdf.cell(col_widths[2], row_height, f"{total_values[1]:.2f}".replace('.', ','), 1, 0, 'C')  # 2 decimales con coma
+        pdf.cell(col_widths[3], row_height, f"{total_values[2]:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'), 1, 0, 'C')  # Miles con punto y decimales con coma
+        pdf.cell(col_widths[4], row_height, '', 1, 0, 'C')
+        
+        if has_missing_info:
+            pdf.ln(10)
+            pdf.set_font('Arial', 'B', 10)
+            pdf.cell(page_width, row_height, 'hay registros sin informacion', 0, 1, 'C')
+        
+        pdf.output(pdf_path)
+        
+    except Exception as e:
+        logging.error(f"Error creating PDF: {str(e)}")
+        raise
+
 def cleanup_text_for_pdf(text):
     """
     Helper function to clean up text for PDF creation.
@@ -822,59 +890,6 @@ def cleanup_text_for_pdf(text):
     if text is None:
         return ''
     return ''.join(char if ord(char) < 256 else '?' for char in text)
-
-def create_pdf_results(excel_path, pdf_path, has_missing_info):
-    """
-    Creates a simple but robust PDF with table from Excel data.
-    Uses basic FPDF functionality that works across all systems.
-    """
-    try:
-        # Cargar el archivo de Excel y la hoja de resultados
-        workbook = load_workbook(excel_path, data_only=True)  # "data_only" evalúa los valores en lugar de fórmulas
-        sheet = workbook['Principal']  # Cambiado de 'RESULTADOS' a 'Principal'
-        
-        pdf = FPDF()
-        pdf.add_page()
-        
-        # Usar fuente incorporada
-        pdf.set_font('Arial', size=10)
-        
-        # Configuración de la tabla
-        col_widths = [50, 30, 35, 35, 50]  # Anchos de columna ajustados
-        row_height = 8
-        page_width = sum(col_widths)
-        
-        # Título
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(page_width, 10, 'Resultados', 0, 1, 'C')
-        pdf.ln(10)
-        
-        # Encabezados de la tabla
-        pdf.set_font('Arial', 'B', 10)
-        headers = ['SHIPPING MARK MARCA', 'CARTONES', 'CUBICAJE', 'PESO', 'ANOTACION']
-        for i, header in enumerate(headers):
-            pdf.cell(col_widths[i], row_height, header, 1, 0, 'C')
-        pdf.ln(row_height)
-        
-        # Filas de la tabla
-        pdf.set_font('Arial', '', 10)
-        for row in sheet.iter_rows(min_row=2, values_only=True):
-            for i, value in enumerate(row):
-                pdf.cell(col_widths[i], row_height, cleanup_text_for_pdf(str(value)), 1, 0, 'C')
-            pdf.ln(row_height)
-        
-        # Agregar el mensaje "hay registros sin informacion" si es necesario
-        if has_missing_info:
-            pdf.ln(10)
-            pdf.set_font('Arial', 'B', 10)
-            pdf.cell(page_width, row_height, 'hay registros sin informacion', 0, 1, 'C')
-        
-        # Guardar el PDF
-        pdf.output(pdf_path)
-        
-    except Exception as e:
-        logging.error(f"Error creating PDF: {str(e)}")
-        raise
 def create_results_file(df, output_path, marca_col):
     results_columns = ['SHIPPING MARK MARCA', 'CTNS', 'T/CBM', 'T/WEIGHT (KG)']
     
