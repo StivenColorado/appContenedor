@@ -85,9 +85,35 @@ class LoadingScreen:
     def close(self):
         self.window.destroy()
 
+def setup_app_icon(root):
+    """
+    Configura el icono de la aplicación para Windows y macOS
+    """
+    try:
+        # Para Windows
+        if os.name == 'nt':
+            root.iconbitmap('./icon.ico')
+        # Para macOS
+        elif os.name == 'posix':
+            # Cargar el icono como imagen
+            img = tk.Image("photo", file='./icon.ico')
+            root.tk.call('wm', 'iconphoto', root._w, img)
+            # Configurar icono en el Dock
+            try:
+                from Foundation import NSBundle
+                bundle = NSBundle.mainBundle()
+                info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+                info['CFBundleIconFile'] = 'icon.ico'
+            except ImportError:
+                pass
+    except Exception as e:
+        logging.error(f"Error setting up app icon: {str(e)}")
+
 class ExcelProcessorApp:
     def __init__(self, root):
         self.root = root
+        
+        setup_app_icon(root)
         
         # Ocultar la ventana principal temporalmente
         self.root.withdraw()
