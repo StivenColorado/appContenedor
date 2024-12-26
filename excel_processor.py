@@ -18,6 +18,8 @@ import re
 import time
 import copy
 from PIL import JpegImagePlugin
+from tkinter import simpledialog
+
 JpegImagePlugin._getmp = lambda: None
 # Suppress Tkinter deprecation warning
 os.environ['TK_SILENCE_DEPRECATION'] = '1'
@@ -550,6 +552,48 @@ def clean_dataframe(df):
     
     return df
 
+def normalize_brand(brand):
+    """
+    Normaliza el nombre de la marca eliminando todo después del primer guion (- o _).
+    """
+    if '-' in brand:
+        brand = brand.split('-')[0].strip()
+    elif '_' in brand:
+        brand = brand.split('_')[0].strip()
+    return brand
+
+def validate_and_normalize_brands(df, marca_col):
+    """
+    Normaliza y valida las marcas en el DataFrame.
+    """
+    df[marca_col] = df[marca_col].astype(str).str.strip().str.upper()
+    normalized_brands = df[marca_col].apply(normalize_brand)
+    
+    # Verificar marcas con menos de dos caracteres
+    short_brands = normalized_brands[normalized_brands.str.len() < 2].unique()
+    for short_brand in short_brands:
+        if short_brand:
+            response = simpledialog.askstring(
+                "Validación de Marca",
+                f"La marca '{short_brand}' tiene menos de dos caracteres. ¿Es una marca aparte o un error de digitación? (Escribe 'aparte' o el nombre de la marca correcta)"
+            )
+            if response and response.lower() != 'aparte':
+                response = response.upper().strip()
+                if response in normalized_brands.values:
+                    normalized_brands = normalized_brands.replace(short_brand, response)
+                else:
+                    confirm = messagebox.askyesno(
+                        "Confirmación de Marca",
+                        f"La marca '{response}' no existe en el archivo. ¿Estás seguro de que es el nombre correcto? Si seleccionas 'No', se creará como 'APARTE'."
+                    )
+                    if confirm:
+                        normalized_brands = normalized_brands.replace(short_brand, response)
+                    else:
+                        normalized_brands = normalized_brands.replace(short_brand, 'APARTE')
+    
+    df[marca_col] = normalized_brands
+    return df
+
 def process_excel(input_path, output_path, consolidado):
     temp_dir = tempfile.mkdtemp()
     try:
@@ -608,6 +652,9 @@ def process_excel(input_path, output_path, consolidado):
         if marca_col is None:
             raise ValueError("No se encontró la columna de marca del producto")
         
+        # Validar y normalizar marcas
+        df = validate_and_normalize_brands(df, marca_col)
+        
         # Create results files
         year = str(datetime.now().year)[-2:]
         results_basename = f"RESULTADOS_CONSO_{consolidado}_{year}"
@@ -644,7 +691,6 @@ def process_excel(input_path, output_path, consolidado):
         create_pdf_results(results_excel, results_pdf)
         
         # Procesar archivos por marca
-        df[marca_col] = df[marca_col].astype(str).str.strip().str.upper()
         processed_brands = set()
         
         for marca in df[marca_col].unique():
@@ -717,7 +763,7 @@ def create_results_sheet(df, writer, marca_col):
         col_letter = get_column_letter(col_idx)
         cell = worksheet.cell(row=total_row, column=col_idx)
         cell.value = f'=SUM({col_letter}2:{col_letter}{total_row-1})'
-        cell.font = Font(bold=True)    
+        cell.font = Font(bold=True)
 def find_brand_column(df):
     """
     Encuentra la columna que contiene la marca del producto
@@ -954,5 +1000,8 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
-    main()
+    root = tk.Tk()
+    root.withdraw()  # Ocultar la ventana principal de Tkinter
+    app = ExcelProcessorApp(root)
+    root.mainloop()
 
