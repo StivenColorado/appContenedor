@@ -562,6 +562,13 @@ def normalize_brand(brand):
         brand = brand.split('_')[0].strip()
     return brand
 
+def normalize_brand_name(brand_name):
+    """
+    Normaliza el nombre de la marca eliminando caracteres especiales y espacios.
+    """
+    return re.sub(r'[^A-Za-z0-9]', '', brand_name).upper()
+
+
 def validate_and_normalize_brands(df, marca_col):
     """
     Normaliza y valida las marcas en el DataFrame.
@@ -578,7 +585,7 @@ def validate_and_normalize_brands(df, marca_col):
                 f"La marca '{short_brand}' tiene menos de dos caracteres. ¿Es una marca aparte o un error de digitación? (Escribe 'aparte' o el nombre de la marca correcta)"
             )
             if response and response.lower() != 'aparte':
-                response = response.upper().strip()
+                response = normalize_brand_name(response)
                 if response in normalized_brands.values:
                     normalized_brands = normalized_brands.replace(short_brand, response)
                 else:
@@ -593,7 +600,6 @@ def validate_and_normalize_brands(df, marca_col):
     
     df[marca_col] = normalized_brands
     return df
-
 def process_excel(input_path, output_path, consolidado):
     temp_dir = tempfile.mkdtemp()
     try:
