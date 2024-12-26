@@ -1,1 +1,5 @@
-pip install pandas numpy openpyxl
+pandas 
+numpy 
+openpyxl
+fpdf 
+Pillow

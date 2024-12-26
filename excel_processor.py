@@ -553,20 +553,25 @@ def process_excel(input_path, output_path, consolidado):
         
         # Create results files
         year = str(datetime.now().year)[-2:]
-        results_basename = f"RESULTADOS_CONS_{consolidado}_{year}"
+        results_basename = f"RESULTADOS_CONSO_{consolidado}_{year}"
         results_excel = os.path.join(output_path, f"{results_basename}.xlsx")
         results_pdf = os.path.join(output_path, f"{results_basename}.pdf")
         
         # En lugar de copiar directamente, guardamos el DataFrame limpio
         with pd.ExcelWriter(results_excel, engine='openpyxl') as writer:
-            # Guardar la hoja principal sin las columnas de precios
-            df.to_excel(writer, index=False, sheet_name='Principal', startrow=5)
+            # Agregar la hoja de resultados como principal
+            create_results_sheet(df, writer, marca_col)
             
-            # Copiar las imágenes del archivo original a la nueva hoja
-            worksheet = writer.book['Principal']
-            for image in workbook.active._images:
-                img_copy = copy.deepcopy(image)
-                worksheet.add_image(img_copy)
+            # Obtener la hoja de resultados y renombrarla a 'Principal'
+            worksheet = writer.sheets['RESULTADOS']
+            worksheet.title = 'Principal'
+            
+            # Aplicar formato a las columnas
+            header_fill = PatternFill(start_color='ADD8E6', end_color='ADD8E6', fill_type='solid')
+            header_font = Font(bold=True)
+            for cell in worksheet[1]:
+                cell.fill = header_fill
+                cell.font = header_font
             
             # Aplicar formato a las columnas
             header_fill = PatternFill(start_color='ADD8E6', end_color='ADD8E6', fill_type='solid')
@@ -622,7 +627,7 @@ def create_results_sheet(df, writer, marca_col):
     Crea la hoja de RESULTADOS en el archivo Excel existente
     """
     results_columns = ['SHIPPING MARK MARCA', 'CTNS', 'T/CBM', 'T/WEIGHT (KG)']
-    new_column_names = ['SHIPPING MARK MARCA', 'CARTONES', 'CUBICAJE', 'PESO']
+    new_column_names = ['SHIPPING MARK MARCA', 'CARTONES', 'CUBICAJE', 'PESO', 'ANOTACION']
     
     # Create summary by brand
     summary = df.groupby(marca_col).agg({
@@ -630,6 +635,9 @@ def create_results_sheet(df, writer, marca_col):
         'T/CBM': 'sum',
         'T/WEIGHT (KG)': 'sum'
     }).reset_index()
+    
+    # Add annotation column
+    summary['ANOTACION'] = summary.apply(lambda row: 'hay registros sin informacion' if (row == 0).sum() > 1 else '', axis=1)
     
     # Write to Excel
     summary.to_excel(writer, sheet_name='RESULTADOS', index=False)
@@ -653,8 +661,7 @@ def create_results_sheet(df, writer, marca_col):
         col_letter = get_column_letter(col_idx)
         cell = worksheet.cell(row=total_row, column=col_idx)
         cell.value = f'=SUM({col_letter}2:{col_letter}{total_row-1})'
-        cell.font = Font(bold=True)
-
+        cell.font = Font(bold=True)    
 def find_brand_column(df):
     """
     Encuentra la columna que contiene la marca del producto
@@ -673,17 +680,17 @@ def create_pdf_results(excel_path, pdf_path):
     try:
         # Cargar el archivo de Excel y la hoja de resultados
         workbook = load_workbook(excel_path, data_only=True)  # "data_only" evalúa los valores en lugar de fórmulas
-        sheet = workbook['RESULTADOS']
+        sheet = workbook['Principal']  # Cambiado de 'RESULTADOS' a 'Principal'
         
         pdf = FPDF()
         pdf.add_page()
         
         # Usar fuente incorporada
-        pdf.set_font('Arial', size=12)
+        pdf.set_font('Arial', size=10)
         
         # Configuración de la tabla
-        col_widths = [60, 40, 45, 45]  # Anchos de columna ajustados
-        row_height = 10
+        col_widths = [50, 30, 35, 35, 50]  # Anchos de columna ajustados
+        row_height = 8
         page_width = sum(col_widths)
         
         # Título
@@ -724,15 +731,15 @@ def create_pdf_results(excel_path, pdf_path):
                 
                 # Configurar estilo
                 if is_header or is_total:
-                    pdf.set_font('Arial', 'B', 12)
+                    pdf.set_font('Arial', 'B', 10)
                 else:
-                    pdf.set_font('Arial', '', 12)
+                    pdf.set_font('Arial', '', 10)
                 
                 # Dibujar celda
                 pdf.cell(
                     width,                     # ancho
                     row_height,               # alto
-                    value,                    # texto
+                    str(value),              # texto (convertido a string)
                     1,                        # borde
                     0,                        # sin salto de línea
                     'C',                      # centrado
@@ -746,7 +753,6 @@ def create_pdf_results(excel_path, pdf_path):
         logging.error(f"Error creating PDF: {str(e)}")
         messagebox.showerror("Error", f"Error al crear el PDF: {str(e)}")
         raise
-
 def cleanup_text_for_pdf(text):
     """
     Helper function to clean up text for PDF creation.
