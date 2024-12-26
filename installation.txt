@@ -29,4 +29,4 @@ pyinstaller --onefile --windowed excel_processor.py
 pyinstaller --onefile --windowed excel_processor.py
 
 
-pyinstaller --onefile --windowed --icon=icon.ico --name=ProcesadorExcel tu_script.py
+pyinstaller --onefile --windowed --icon=icon.ico --name=ProcesadorExcel .\excel_processor.py

@@ -382,7 +382,7 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
     
     return images_info
 def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row, zafiro_number):
-    filename = f"MARCA_{marca}_{consolidado}-{year}.xlsx"
+    filename = f"MARCA_{marca}_CONSO_{consolidado}-{year}.xlsx"
     filepath = os.path.join(output_path, filename)
     
     wb = Workbook()
@@ -449,8 +449,8 @@ def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_
             if product_pic_col:
                 try:
                     img = Image(images_info['products'][start_row + df_idx]['path'])
-                    img.width = 45  # Ajusta el ancho de la imagen
-                    img.height = 45  # Ajusta el alto de la imagen
+                    img.width = 120  # Ajusta el ancho de la imagen
+                    img.height = 120  # Ajusta el alto de la imagen
                     cell_address = f"{get_column_letter(product_pic_col)}{current_row}"
                     ws.column_dimensions[get_column_letter(product_pic_col)].width = 25  # Ajusta el ancho de la columna
                     ws.row_dimensions[current_row].height = 100  # Ajusta el alto de la fila
