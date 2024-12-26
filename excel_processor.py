@@ -87,30 +87,6 @@ class LoadingScreen:
     def close(self):
         self.window.destroy()
 
-# funciones para la ventana principal
-def setup_app_icon(root):
-    """
-    Configura el icono de la aplicación para Windows y macOS
-    """
-    try:
-        # Para Windows
-        if os.name == 'nt':
-            root.iconbitmap('./icon.ico')
-        # Para macOS
-        elif os.name == 'posix':
-            # Cargar el icono como imagen
-            img = tk.Image("photo", file='./icon.ico')
-            root.tk.call('wm', 'iconphoto', root._w, img)
-            # Configurar icono en el Dock
-            try:
-                from Foundation import NSBundle
-                bundle = NSBundle.mainBundle()
-                info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
-                info['CFBundleIconFile'] = 'icon.ico'
-            except ImportError:
-                pass
-    except Exception as e:
-        logging.error(f"Error setting up app icon: {str(e)}")
 def center_window(window):
     window.update_idletasks()
     width = window.winfo_width()
@@ -118,6 +94,31 @@ def center_window(window):
     x = (window.winfo_screenwidth() // 2) - (width // 2)
     y = (window.winfo_screenheight() // 2) - (height // 2)
     window.geometry(f'{width}x{height}+{x}+{y}')
+
+# funciones para la ventana principal
+def setup_app_icon(root):
+    """
+    Configura el icono de la aplicación para Windows y macOS
+    """
+    try:
+        # Cargar los iconos
+        icono_chico = tk.PhotoImage(file='./icon-16.png')
+        icono_grande = tk.PhotoImage(file='./icon-32.png')
+        
+        # Configurar el icono para la ventana
+        root.iconphoto(False, icono_grande, icono_chico)
+        
+        # Configurar icono en el Dock para macOS
+        if os.name == 'posix':
+            try:
+                from Foundation import NSBundle
+                bundle = NSBundle.mainBundle()
+                info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+                info['CFBundleIconFile'] = 'icon-32.png'
+            except ImportError:
+                pass
+    except Exception as e:
+        logging.error(f"Error setting up app icon: {str(e)}")
 
 class ExcelProcessorApp:
     def __init__(self, root):
@@ -1013,4 +1014,3 @@ if __name__ == "__main__":
     root.withdraw()  # Ocultar la ventana principal de Tkinter
     app = ExcelProcessorApp(root)
     root.mainloop()
-
