@@ -522,6 +522,34 @@ def add_totals_row(worksheet, brand_df, total_row):
     total_label.font = Font(bold=True)
     total_label.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
 
+def find_end_row(df):
+    """
+    Encuentra la última fila válida de datos antes de la palabra TOTAL
+    """
+    for idx, row in df.iterrows():
+        row_values = [str(val).strip().upper() for val in row if pd.notna(val)]
+        if 'TOTAL' in row_values:
+            return idx
+    return len(df)
+
+def clean_dataframe(df):
+    """
+    Limpia el DataFrame eliminando filas después de TOTAL y filas que no son datos válidos
+    """
+    # Encontrar la última fila válida
+    end_row = find_end_row(df)
+    
+    # Cortar el DataFrame hasta la fila encontrada
+    df = df.iloc[:end_row]
+    
+    # Eliminar filas donde todas las columnas numéricas son NaN o 0
+    numeric_columns = df.select_dtypes(include=[np.number]).columns
+    if not numeric_columns.empty:
+        df = df.dropna(subset=numeric_columns, how='all')
+        df = df[(df[numeric_columns] != 0).any(axis=1)]
+    
+    return df
+
 def process_excel(input_path, output_path, consolidado):
     temp_dir = tempfile.mkdtemp()
     try:
@@ -572,6 +600,9 @@ def process_excel(input_path, output_path, consolidado):
                         if any(term in col.upper() 
                               for term in ['UNIT PRICE', 'AMOUNT', '单价', '总金额', 'RMB'])]
         df = df.drop(columns=price_columns, errors='ignore')
+        
+        # Limpiar el DataFrame eliminando filas después de "TOTAL"
+        df = clean_dataframe(df)
         
         marca_col = find_brand_column(df)
         if marca_col is None:
@@ -646,7 +677,6 @@ def process_excel(input_path, output_path, consolidado):
         raise
     finally:
         shutil.rmtree(temp_dir)
-
 
 def create_results_sheet(df, writer, marca_col):
     """

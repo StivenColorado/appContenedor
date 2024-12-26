@@ -37,3 +37,9 @@ exe = EXE(
     entitlements_file=None,
     icon=['icon.ico'],
 )
+app = BUNDLE(
+    exe,
+    name='ProcesadorExcel.app',
+    icon='icon.ico',
+    bundle_identifier=None,
+)
