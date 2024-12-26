@@ -87,6 +87,7 @@ class LoadingScreen:
     def close(self):
         self.window.destroy()
 
+# funciones para la ventana principal
 def setup_app_icon(root):
     """
     Configura el icono de la aplicación para Windows y macOS
@@ -110,6 +111,13 @@ def setup_app_icon(root):
                 pass
     except Exception as e:
         logging.error(f"Error setting up app icon: {str(e)}")
+def center_window(window):
+    window.update_idletasks()
+    width = window.winfo_width()
+    height = window.winfo_height()
+    x = (window.winfo_screenwidth() // 2) - (width // 2)
+    y = (window.winfo_screenheight() // 2) - (height // 2)
+    window.geometry(f'{width}x{height}+{x}+{y}')
 
 class ExcelProcessorApp:
     def __init__(self, root):
@@ -130,6 +138,7 @@ class ExcelProcessorApp:
         self.root.deiconify()
         self.root.title("Procesador de Excel")
         self.root.geometry("600x450")
+        center_window(root)
         
         # Configurar el estilo
         style = ttk.Style()
