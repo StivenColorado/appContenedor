@@ -76,7 +76,8 @@ class LoadingScreen:
         self.dev_label = ttk.Label(
             main_frame,
             text="Desarrollado por Stiven Colorado",
-            font=('Helvetica', 10, 'italic')
+            font=('Helvetica', 10, 'italic'),
+            foreground='black'
         )
         self.dev_label.pack(pady=10)
         
@@ -845,9 +846,14 @@ def create_pdf_results(excel_path, pdf_path, has_missing_info):
         pdf.add_page()
         pdf.set_font('Arial', size=10)
         
-        col_widths = [50, 30, 35, 35, 50]
+        # Definimos anchos de columna más pequeños para centrar
+        col_widths = [45, 25, 30, 30, 45]  # Reducimos los anchos
         row_height = 8
         page_width = sum(col_widths)
+        
+        # Calculamos el margen izquierdo para centrar la tabla
+        margin_left = (210 - page_width) / 2  # 210 es el ancho de una página A4
+        pdf.set_left_margin(margin_left)
         
         pdf.set_font('Arial', 'B', 12)
         pdf.cell(page_width, 10, 'Resultados', 0, 1, 'C')
@@ -875,28 +881,54 @@ def create_pdf_results(excel_path, pdf_path, has_missing_info):
 
             for i, value in enumerate(row):
                 text = cleanup_text_for_pdf(str(value)) if value not in (None, 'None') else ''
+                
+                # Reducir el tamaño de la letra para valores con muchos decimales
+                if i in [2, 3]:  # Columnas de CUBICAJE y PESO
+                    if len(text) > 8:  # Si el número es largo
+                        pdf.set_font('Arial', '', 8)  # Reducimos a tamaño 8
+                    else:
+                        pdf.set_font('Arial', '', 10)  # Volvemos al tamaño normal
+                
                 pdf.cell(col_widths[i], row_height, text, 1, 0, 'C')
             pdf.ln(row_height)
 
-        # Format totals with specific formats for each column
+        # Format totals with smaller font for long numbers
         pdf.set_font('Arial', 'B', 10)
         pdf.cell(col_widths[0], row_height, 'TOTAL', 1, 0, 'C')
-        pdf.cell(col_widths[1], row_height, f"{total_values[0]:.0f}", 1, 0, 'C')  # Sin decimales
-        pdf.cell(col_widths[2], row_height, f"{total_values[1]:.2f}".replace('.', ','), 1, 0, 'C')  # 2 decimales con coma
-        pdf.cell(col_widths[3], row_height, f"{total_values[2]:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'), 1, 0, 'C')  # Miles con punto y decimales con coma
+        
+        # CARTONES total
+        total_cartones = f"{total_values[0]:.0f}"
+        pdf.cell(col_widths[1], row_height, total_cartones, 1, 0, 'C')
+        
+        # CUBICAJE total
+        total_cubicaje = f"{total_values[1]:.2f}".replace('.', ',')
+        font_size = 8 if len(total_cubicaje) > 8 else 10
+        pdf.set_font('Arial', 'B', font_size)
+        pdf.cell(col_widths[2], row_height, total_cubicaje, 1, 0, 'C')
+        
+        # PESO total
+        total_peso = f"{total_values[2]:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        font_size = 8 if len(total_peso) > 8 else 10
+        pdf.set_font('Arial', 'B', font_size)
+        pdf.cell(col_widths[3], row_height, total_peso, 1, 0, 'C')
+        
+        # Última columna vacía
+        pdf.set_font('Arial', 'B', 10)
         pdf.cell(col_widths[4], row_height, '', 1, 0, 'C')
         
+        # Añadimos el texto de registros sin información con fuente más pequeña
         if has_missing_info:
-            pdf.ln(10)
-            pdf.set_font('Arial', 'B', 10)
-            pdf.cell(page_width, row_height, 'hay registros sin informacion', 0, 1, 'C')
+            pdf.ln(15)
+            pdf.set_left_margin(10)  # Reseteamos el margen
+            pdf.set_font('Arial', 'B', 8)  # Reducimos el tamaño de la fuente
+            pdf.cell(0, row_height, 'hay registros sin informacion', 0, 1, 'C')
         
         pdf.output(pdf_path)
         
     except Exception as e:
         logging.error(f"Error creating PDF: {str(e)}")
         raise
-
+    
 def cleanup_text_for_pdf(text):
     """
     Helper function to clean up text for PDF creation.
