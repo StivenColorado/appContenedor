@@ -34,5 +34,9 @@ pyinstaller --onefile --windowed excel_processor.py
 #windows
 pyinstaller --onefile --windowed --icon=icon.ico --name=ProcesadorExcel .\excel_processor.py
 
+#por si surgen errores
+python -m PyInstaller --noconfirm --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "zafiro.png;." .\excel_processor.py
+
+
 #mac
 pyinstaller --onefile --windowed --icon=icon.ico --name=ProcesadorExcel excel_processor.py

@@ -95,31 +95,33 @@ def center_window(window):
     y = (window.winfo_screenheight() // 2) - (height // 2)
     window.geometry(f'{width}x{height}+{x}+{y}')
 
-# funciones para la ventana principal
+
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)# funciones para la ventana principal
+
 def setup_app_icon(root):
     """
-    Configura el icono de la aplicación para Windows y macOS
+    Configura el icono de la aplicación solo para la barra de tareas de Windows
     """
     try:
-        # Cargar los iconos
-        icono_chico = tk.PhotoImage(file='./icon-16.png')
-        icono_grande = tk.PhotoImage(file='./icon-32.png')
+        if os.name == 'nt':  # Solo para Windows
+            icon_path = resource_path('icon.ico')
+            root.iconbitmap(icon_path)
         
-        # Configurar el icono para la ventana
-        root.iconphoto(False, icono_grande, icono_chico)
+        # Quitar el icono de la ventana
+        root.overrideredirect(False)
+        root.iconwindow()
         
-        # Configurar icono en el Dock para macOS
-        if os.name == 'posix':
-            try:
-                from Foundation import NSBundle
-                bundle = NSBundle.mainBundle()
-                info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
-                info['CFBundleIconFile'] = 'icon-32.png'
-            except ImportError:
-                pass
     except Exception as e:
         logging.error(f"Error setting up app icon: {str(e)}")
-
 class ExcelProcessorApp:
     def __init__(self, root):
         self.root = root
@@ -138,7 +140,7 @@ class ExcelProcessorApp:
         # mostrar la pantalla
         self.root.deiconify()
         self.root.title("Procesador de Excel")
-        self.root.geometry("600x450")
+        self.root.geometry("700x500")
         center_window(root)
         
         # Configurar el estilo
@@ -149,6 +151,18 @@ class ExcelProcessorApp:
         self.main_frame = ttk.Frame(root, padding="20", style='Custom.TFrame')
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         
+        # Logo Zafiro
+        try:
+            zafiro_path = resource_path('zafiro.png')
+            zafiro_image = tk.PhotoImage(file=zafiro_path)
+            # Redimensionar si es necesario
+            zafiro_image = zafiro_image.subsample(2, 2)  # Ajusta estos números según necesites
+            zafiro_label = ttk.Label(self.main_frame, image=zafiro_image)
+            zafiro_label.image = zafiro_image  # Mantener referencia
+            zafiro_label.pack(pady=(0, 20))
+        except Exception as e:
+            logging.error(f"Error loading Zafiro logo: {str(e)}")
+
         # Etiqueta de título
         self.title_label = ttk.Label(
             self.main_frame,
