@@ -583,10 +583,10 @@ def normalize_brand(brand):
     """
     Normaliza el nombre de la marca eliminando todo después del primer guion (- o _).
     """
-    # if '-' in brand:
-    #     brand = brand.split('-')[0].strip()
-    # elif '_' in brand:
-    #     brand = brand.split('_')[0].strip()
+    if '-Z' in brand or '-z' in brand:
+        brand = brand.split('-Z')[0].split('-z')[0].strip()
+    elif '_Z' in brand or '_z' in brand:
+        brand = brand.split('_Z')[0].split('_z')[0].strip()
     return brand
 
 def normalize_brand_name(brand_name):
