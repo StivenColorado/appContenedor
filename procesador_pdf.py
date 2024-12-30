@@ -12,12 +12,15 @@ import platform
 import cv2
 import numpy as np
 
+# Set TESSDATA_PREFIX environment variable
+os.environ['TESSDATA_PREFIX'] = '/usr/local/share/tessdata/'
+
 class PDFProcessorApp:
     def __init__(self, root):
         self.root = root
         self.setup_window()
         self.create_widgets()
-        
+        self.ocr_lang = 'eng'
     def setup_window(self):
         self.root.title("Selección de Archivo PDF")
         self.root.geometry("500x300")
@@ -125,8 +128,9 @@ class PreviewWindow:
         self.preview_image = None
         self.subpartida_numbers = []
         self.backups = []
-        self.page_types = []
+        self.page_types = ['p']
         self.zoom_factor = 1.5
+        self.ocr_lang = 'eng'
         
         if platform.system() == 'Windows':
             pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -135,26 +139,29 @@ class PreviewWindow:
         self.create_widgets()
         self.load_pdf()
 
-
     def preprocess_image_for_ocr(self, image):
-            # Convert PIL Image to OpenCV format
-            opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-            
-            # Resize image to improve OCR (2x larger)
-            height, width = opencv_image.shape[:2]
-            opencv_image = cv2.resize(opencv_image, (width*2, height*2), interpolation=cv2.INTER_CUBIC)
-            
-            # Convert to grayscale
-            gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
-            
-            # Apply binary threshold
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            
-            # Invert back
-            binary = cv2.bitwise_not(binary)
-            
-            # Convert back to PIL Image
-            return Image.fromarray(binary)
+        # Convert PIL Image to OpenCV format
+        opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        
+        # Resize image to improve OCR (2x larger)
+        height, width = opencv_image.shape[:2]
+        opencv_image = cv2.resize(opencv_image, (width*2, height*2), interpolation=cv2.INTER_CUBIC)
+        
+        # Convert to grayscale
+        gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
+        
+        # Apply adaptive thresholding
+        binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        
+        # Apply morphological operations to remove noise
+        kernel = np.ones((1, 1), np.uint8)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        
+        # Invert back
+        binary = cv2.bitwise_not(binary)
+        
+        # Convert back to PIL Image
+        return Image.fromarray(binary)
 
     def check_tesseract_installation(self):
         try:
@@ -162,6 +169,23 @@ class PreviewWindow:
             return True
         except Exception:
             return False
+
+    def extract_numbers_from_text(self, text):
+        patterns = [
+            r'[Ss]ubpartida\s*[Aa]rancelaria\s*[:#]?\s*(\d{4,}(?:\.\d+)?)',
+            r'[Ss]ubpartida\s*[:#]?\s*(\d{4,}(?:\.\d+)?)',
+            r'SUBPARTIDA\s+ARANCELARIA\s*[:#]?\s*(\d{4,}(?:\.\d+)?)',
+            r'(?:^|\s)(\d{4}\.\d{2}\.\d{2})(?:\s|$)',
+            r'(?<=subpartida\s)(\d{4,}(?:\.\d+)?)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                detected_number = match.group(1).strip()
+                if self.validate_subpartida_format(detected_number):
+                    return detected_number
+        return None
 
     def setup_window(self):
         self.root.title("Previsualización y Edición")
@@ -253,7 +277,6 @@ class PreviewWindow:
     def load_pdf(self):
         try:
             self.pdf_document = fitz.open(self.input_path)
-            self.detect_subpartidas_and_backups()
             self.update_page_display()
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar el PDF: {str(e)}")
@@ -265,7 +288,7 @@ class PreviewWindow:
             
             # Use default language if Spanish not available
             try:
-                text = pytesseract.image_to_string(img, lang='spa')
+                text = pytesseract.image_to_string(img, lang='eng')
             except pytesseract.TesseractError:
                 text = pytesseract.image_to_string(img)
             
@@ -431,11 +454,8 @@ class PreviewWindow:
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
         
     def on_button_press(self, event):
-        # Convertir coordenadas del evento a coordenadas del canvas
         self.start_x = self.canvas.canvasx(event.x)
         self.start_y = self.canvas.canvasy(event.y)
-        
-        # Crear rectángulo con un borde más visible
         self.rect = self.canvas.create_rectangle(
             self.start_x, self.start_y, 
             self.start_x, self.start_y, 
@@ -443,20 +463,11 @@ class PreviewWindow:
             width=2
         )
         
-        # Guardar las coordenadas originales del evento
-        self.start_event_x = event.x
-        self.start_event_y = event.y
- 
     def on_mouse_drag(self, event):
-        # Actualizar coordenadas del rectángulo
         cur_x = self.canvas.canvasx(event.x)
         cur_y = self.canvas.canvasy(event.y)
         self.canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
         
-        # Guardar las coordenadas actuales del evento
-        self.current_event_x = event.x
-        self.current_event_y = event.y
-
     def on_button_release(self, event):
         try:
             coords = self.canvas.coords(self.rect)
@@ -466,11 +477,9 @@ class PreviewWindow:
             x0, y0, x1, y1 = coords
             page = self.pdf_document[self.current_page]
             
-            # Get the visible portion of the page as image
             pix = page.get_pixmap(matrix=fitz.Matrix(self.zoom_factor, self.zoom_factor))
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
-            # Calculate selection coordinates
             selection_box = (
                 min(x0, x1),
                 min(y0, y1),
@@ -478,35 +487,37 @@ class PreviewWindow:
                 max(y0, y1)
             )
             
-            # Crop image to selection
             selection = img.crop(selection_box)
+            processed_image = self.preprocess_image_for_ocr(selection)
             
-            # Perform OCR on selection
-            text = pytesseract.image_to_string(selection, lang=self.ocr_lang)
+            text = pytesseract.image_to_string(processed_image, lang=self.ocr_lang)
+            detected_number = self.extract_numbers_from_text(text)
             
-            # Process detected text
-            patterns = [
-                r'Subpartida\s+[Aa]rancelaria\s*[:#]?\s*(\d+)',
-                r'SUBPARTIDA\s+ARANCELARIA\s*[:#]?\s*(\d+)',
-                r'Subpartida\s*[:#]?\s*(\d+)',
-                r'[Ss]ubpartida\s*(\d{4,}(?:\.\d+)?)',
-                r'\b(\d{4,}(?:\.\d+)?)\b'
-            ]
+            # Print coordinates and detected number
+            print(f"Coordinates: {coords}")
+            print(f"Detected number: {detected_number}")
             
-            for pattern in patterns:
-                match = re.search(pattern, text)
-                if match:
-                    detected_number = match.group(1).strip()
-                    if not any(char.isalpha() for char in detected_number):
-                        self.subpartida_var.set(detected_number)
-                        print(f"Número detectado por OCR: {detected_number}")
-                        break
+            if detected_number:
+                self.subpartida_var.set(detected_number)
+                print(f"Número detectado: {detected_number}")
+            
+            # Display the selected area in a temporary window
+            temp_window = tk.Toplevel(self.root)
+            temp_window.title("Selected Area")
+            temp_window.geometry("+0+0")  # Position at the bottom left
+            temp_image = ImageTk.PhotoImage(processed_image)
+            temp_label = ttk.Label(temp_window, image=temp_image)
+            temp_label.image = temp_image
+            temp_label.pack()
+            
+            # Automatically close the temporary window after a short delay
+            self.root.after(3000, temp_window.destroy)
             
             self.canvas.delete(self.rect)
             
         except Exception as e:
             print(f"Error en OCR: {str(e)}")
-            messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")
+            messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")      
     def save_pdfs(self):
         try:
             input_pdf = PyPDF2.PdfReader(self.input_path)
@@ -544,6 +555,7 @@ class PreviewWindow:
             
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar los PDFs: {str(e)}")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
