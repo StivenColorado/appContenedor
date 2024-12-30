@@ -3,14 +3,14 @@ from tkinter import ttk, filedialog, messagebox
 import os
 import PyPDF2
 from tkinter import StringVar, Canvas
-import fitz  # PyMuPDF
+import fitz
 import re
 from PIL import Image, ImageTk
 from datetime import datetime
-from docx import Document
-import tempfile
-import subprocess
+import pytesseract
 import platform
+import cv2
+import numpy as np
 
 class PDFProcessorApp:
     def __init__(self, root):
@@ -127,10 +127,42 @@ class PreviewWindow:
         self.backups = []
         self.page_types = []
         self.zoom_factor = 1.5
+        
+        if platform.system() == 'Windows':
+            pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+        
         self.setup_window()
         self.create_widgets()
         self.load_pdf()
-        
+
+
+    def preprocess_image_for_ocr(self, image):
+            # Convert PIL Image to OpenCV format
+            opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            
+            # Resize image to improve OCR (2x larger)
+            height, width = opencv_image.shape[:2]
+            opencv_image = cv2.resize(opencv_image, (width*2, height*2), interpolation=cv2.INTER_CUBIC)
+            
+            # Convert to grayscale
+            gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
+            
+            # Apply binary threshold
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            
+            # Invert back
+            binary = cv2.bitwise_not(binary)
+            
+            # Convert back to PIL Image
+            return Image.fromarray(binary)
+
+    def check_tesseract_installation(self):
+        try:
+            pytesseract.get_tesseract_version()
+            return True
+        except Exception:
+            return False
+
     def setup_window(self):
         self.root.title("Previsualización y Edición")
         # Configurar pantalla completa real
@@ -226,6 +258,22 @@ class PreviewWindow:
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar el PDF: {str(e)}")
 
+    def get_page_text_ocr(self, page):
+        try:
+            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            # Use default language if Spanish not available
+            try:
+                text = pytesseract.image_to_string(img, lang='spa')
+            except pytesseract.TesseractError:
+                text = pytesseract.image_to_string(img)
+            
+            return text
+        except Exception as e:
+            print(f"OCR Error: {str(e)}")
+            return ""
+
     def detect_subpartidas_and_backups(self):
         if not self.pdf_document:
             return
@@ -234,23 +282,22 @@ class PreviewWindow:
             r'[Ss]ubpartida\s*[Aa]rancelaria\s*[:#]?\s*(\d{4,}(?:\.\d+)?)',
             r'[Ss]ubpartida\s*[:#]?\s*(\d{4,}(?:\.\d+)?)',
             r'SUBPARTIDA\s+ARANCELARIA\s*[:#]?\s*(\d{4,}(?:\.\d+)?)',
-            r'(?:^|\s)(\d{4}\.\d{2}\.\d{2})(?:\s|$)',  # Formato específico de subpartida
+            r'(?:^|\s)(\d{4}\.\d{2}\.\d{2})(?:\s|$)',
             r'(?<=subpartida\s)(\d{4,}(?:\.\d+)?)',
         ]
 
         for page_num in range(self.pdf_document.page_count):
-            # Obtener texto de toda la página
             page = self.pdf_document[page_num]
-            text = page.get_text("text")
-            print(f"\nTexto extraído de la página {page_num + 1}:")
-            print(text)  # Debug print
+            # Use OCR instead of direct text extraction
+            text = self.get_page_text_ocr(page)
+            print(f"\nTexto extraído por OCR de la página {page_num + 1}:")
+            print(text)
 
             found_subpartida = False
             for pattern in patterns:
                 matches = re.finditer(pattern, text, re.IGNORECASE)
                 for match in matches:
                     potential_subpartida = match.group(1).strip()
-                    # Validar el formato de la subpartida
                     if self.validate_subpartida_format(potential_subpartida):
                         print(f"Subpartida encontrada: {potential_subpartida}")
                         self.subpartida_numbers.append(potential_subpartida)
@@ -412,51 +459,38 @@ class PreviewWindow:
 
     def on_button_release(self, event):
         try:
-            # Desactivar los eventos de selección
-            self.canvas.unbind("<ButtonPress-1>")
-            self.canvas.unbind("<B1-Motion>")
-            self.canvas.unbind("<ButtonRelease-1>")
-            
-            # Obtener coordenadas del rectángulo en el canvas
             coords = self.canvas.coords(self.rect)
             if not coords:
                 return
                 
             x0, y0, x1, y1 = coords
-            
-            # Obtener la página actual
             page = self.pdf_document[self.current_page]
             
-            # Ajustar las coordenadas considerando el scroll
-            scroll_x = self.canvas.canvasx(0)
-            scroll_y = self.canvas.canvasy(0)
+            # Get the visible portion of the page as image
+            pix = page.get_pixmap(matrix=fitz.Matrix(self.zoom_factor, self.zoom_factor))
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
-            # Ajustar coordenadas por el scroll
-            x0 = x0 + scroll_x
-            x1 = x1 + scroll_x
-            y0 = y0 + scroll_y
-            y1 = y1 + scroll_y
+            # Calculate selection coordinates
+            selection_box = (
+                min(x0, x1),
+                min(y0, y1),
+                max(x0, x1),
+                max(y0, y1)
+            )
             
-            # Convertir coordenadas de canvas a PDF usando un factor de escala simple
-            scale = 1.0 / self.zoom_factor
-            pdf_x0 = min(x0, x1) * scale
-            pdf_y0 = min(y0, y1) * scale
-            pdf_x1 = max(x0, x1) * scale
-            pdf_y1 = max(y0, y1) * scale
+            # Crop image to selection
+            selection = img.crop(selection_box)
             
-            # Crear el rectángulo para la extracción de texto
-            selection_rect = fitz.Rect(pdf_x0, pdf_y0, pdf_x1, pdf_y1)
+            # Perform OCR on selection
+            text = pytesseract.image_to_string(selection, lang=self.ocr_lang)
             
-            # Obtener el texto del área seleccionada
-            text = page.get_textbox(selection_rect)
-            
-            # Patrones mejorados para la detección
+            # Process detected text
             patterns = [
                 r'Subpartida\s+[Aa]rancelaria\s*[:#]?\s*(\d+)',
                 r'SUBPARTIDA\s+ARANCELARIA\s*[:#]?\s*(\d+)',
                 r'Subpartida\s*[:#]?\s*(\d+)',
                 r'[Ss]ubpartida\s*(\d{4,}(?:\.\d+)?)',
-                r'\b(\d{4,}(?:\.\d+)?)\b'  # Números de 4 o más dígitos
+                r'\b(\d{4,}(?:\.\d+)?)\b'
             ]
             
             for pattern in patterns:
@@ -465,15 +499,14 @@ class PreviewWindow:
                     detected_number = match.group(1).strip()
                     if not any(char.isalpha() for char in detected_number):
                         self.subpartida_var.set(detected_number)
-                        print(f"Número detectado: {detected_number}")
+                        print(f"Número detectado por OCR: {detected_number}")
                         break
             
             self.canvas.delete(self.rect)
             
         except Exception as e:
-            print(f"Error en on_button_release: {str(e)}")
-            messagebox.showerror("Error", f"Error al seleccionar texto: {str(e)}")
-      
+            print(f"Error en OCR: {str(e)}")
+            messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")
     def save_pdfs(self):
         try:
             input_pdf = PyPDF2.PdfReader(self.input_path)
