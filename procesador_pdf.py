@@ -20,7 +20,7 @@ class PDFProcessorApp:
         self.root = root
         self.setup_window()
         self.create_widgets()
-        self.ocr_lang = 'eng'
+        self.ocr_lang = 'spa'
     def setup_window(self):
         self.root.title("Selección de Archivo PDF")
         self.root.geometry("500x300")
@@ -130,7 +130,7 @@ class PreviewWindow:
         self.backups = []
         self.page_types = ['p']
         self.zoom_factor = 1.5
-        self.ocr_lang = 'eng'
+        self.ocr_lang = 'spa'
         
         if platform.system() == 'Windows':
             pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -139,29 +139,29 @@ class PreviewWindow:
         self.create_widgets()
         self.load_pdf()
 
-    def preprocess_image_for_ocr(self, image):
+    def preprocess_image(self, image):
         # Convert PIL Image to OpenCV format
         opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        
-        # Resize image to improve OCR (2x larger)
-        height, width = opencv_image.shape[:2]
-        opencv_image = cv2.resize(opencv_image, (width*2, height*2), interpolation=cv2.INTER_CUBIC)
         
         # Convert to grayscale
         gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
         
         # Apply adaptive thresholding
-        binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        thresh = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+        )
         
-        # Apply morphological operations to remove noise
-        kernel = np.ones((1, 1), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        return thresh
+
+    def extract_text_from_roi(self, image, roi_coords, config):
+        # Extract region of interest (ROI)
+        x1, y1, x2, y2 = roi_coords
+        roi = image[y1:y2, x1:x2]
         
-        # Invert back
-        binary = cv2.bitwise_not(binary)
+        # Extract text with Tesseract
+        text = pytesseract.image_to_string(roi, config=config)
         
-        # Convert back to PIL Image
-        return Image.fromarray(binary)
+        return text
 
     def check_tesseract_installation(self):
         try:
@@ -171,20 +171,9 @@ class PreviewWindow:
             return False
 
     def extract_numbers_from_text(self, text):
-        patterns = [
-            r'[Ss]ubpartida\s*[Aa]rancelaria\s*[:#]?\s*(\d{4,}(?:\.\d+)?)',
-            r'[Ss]ubpartida\s*[:#]?\s*(\d{4,}(?:\.\d+)?)',
-            r'SUBPARTIDA\s+ARANCELARIA\s*[:#]?\s*(\d{4,}(?:\.\d+)?)',
-            r'(?:^|\s)(\d{4}\.\d{2}\.\d{2})(?:\s|$)',
-            r'(?<=subpartida\s)(\d{4,}(?:\.\d+)?)'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                detected_number = match.group(1).strip()
-                if self.validate_subpartida_format(detected_number):
-                    return detected_number
+        match = re.search(r'\d+', text)
+        if match:
+            return match.group()
         return None
 
     def setup_window(self):
@@ -288,7 +277,7 @@ class PreviewWindow:
             
             # Use default language if Spanish not available
             try:
-                text = pytesseract.image_to_string(img, lang='eng')
+                text = pytesseract.image_to_string(img, lang='spa')
             except pytesseract.TesseractError:
                 text = pytesseract.image_to_string(img)
             
@@ -488,9 +477,11 @@ class PreviewWindow:
             )
             
             selection = img.crop(selection_box)
-            processed_image = self.preprocess_image_for_ocr(selection)
+            processed_image = self.preprocess_image(selection)
             
-            text = pytesseract.image_to_string(processed_image, lang=self.ocr_lang)
+            tesseract_config = r'--oem 3 --psm 6'
+            height, width = processed_image.shape[:2]
+            text = self.extract_text_from_roi(processed_image, (0, 0, width, height), tesseract_config)
             detected_number = self.extract_numbers_from_text(text)
             
             # Print coordinates and detected number
@@ -505,7 +496,7 @@ class PreviewWindow:
             temp_window = tk.Toplevel(self.root)
             temp_window.title("Selected Area")
             temp_window.geometry("+0+0")  # Position at the bottom left
-            temp_image = ImageTk.PhotoImage(processed_image)
+            temp_image = ImageTk.PhotoImage(Image.fromarray(processed_image))
             temp_label = ttk.Label(temp_window, image=temp_image)
             temp_label.image = temp_image
             temp_label.pack()
