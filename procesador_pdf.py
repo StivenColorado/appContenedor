@@ -20,7 +20,7 @@ class PDFProcessorApp:
         self.root = root
         self.setup_window()
         self.create_widgets()
-        self.ocr_lang = 'spa'
+        self.ocr_lang = 'eng'
     def setup_window(self):
         self.root.title("Selección de Archivo PDF")
         self.root.geometry("500x300")
@@ -126,11 +126,9 @@ class PreviewWindow:
         self.current_page = 0
         self.pdf_document = None
         self.preview_image = None
-        self.subpartida_numbers = []
-        self.backups = []
-        self.page_types = ['p']
+        self.page_data = []  # Lista para almacenar datos de cada página
         self.zoom_factor = 1.5
-        self.ocr_lang = 'spa'
+        self.ocr_lang = 'eng'
         
         if platform.system() == 'Windows':
             pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -207,7 +205,7 @@ class PreviewWindow:
         self.page_label = ttk.Label(nav_frame, text="Página: 0/0")
         self.page_label.pack(side=tk.LEFT, padx=20)
         
-        self.next_button = ttk.Button(nav_frame, text="Siguiente →", command=self.next_page)
+        self.next_button = ttk.Button(nav_frame, text="Siguiente →", command=self.save_and_next)
         self.next_button.pack(side=tk.LEFT, padx=5)
         
         # Frame para número de subpartida
@@ -219,14 +217,18 @@ class PreviewWindow:
         self.subpartida_entry = ttk.Entry(subpartida_frame, textvariable=self.subpartida_var, width=20)
         self.subpartida_entry.pack(side=tk.LEFT, padx=5)
         
-        # Frame para tipo de página
+        # Frame para tipo de página (botones radio)
         tipo_frame = ttk.Frame(control_frame)
         tipo_frame.pack(side=tk.LEFT, padx=20)
         
-        self.tipo_var = StringVar()
-        ttk.Label(tipo_frame, text="Tipo de Página (p/e):", font=('Helvetica', 10)).pack(side=tk.LEFT, padx=5)
-        self.tipo_entry = ttk.Entry(tipo_frame, textvariable=self.tipo_var, width=5)
-        self.tipo_entry.pack(side=tk.LEFT, padx=5)
+        self.tipo_var = StringVar(value='p')  # Default a principal
+        ttk.Label(tipo_frame, text="Tipo de Página:", font=('Helvetica', 10)).pack(side=tk.LEFT, padx=5)
+        
+        self.radio_principal = ttk.Radiobutton(tipo_frame, text="Principal", value='p', variable=self.tipo_var)
+        self.radio_principal.pack(side=tk.LEFT, padx=2)
+        
+        self.radio_espaldar = ttk.Radiobutton(tipo_frame, text="Espaldar", value='e', variable=self.tipo_var)
+        self.radio_espaldar.pack(side=tk.LEFT, padx=2)
         
         # Botones de acción
         action_frame = ttk.Frame(control_frame)
@@ -235,18 +237,20 @@ class PreviewWindow:
         self.select_button = ttk.Button(action_frame, text="Seleccionar Texto", command=self.select_text)
         self.select_button.pack(side=tk.RIGHT, padx=5)
         
-        self.save_button = ttk.Button(action_frame, text="Guardar", command=self.save_pdfs)
+        self.save_button = ttk.Button(action_frame, text="Guardar Todo", command=self.save_pdfs)
         self.save_button.pack(side=tk.RIGHT, padx=5)
         
-        # Frame para preview con scrollbars
+        # Configurar teclas rápidas
+        self.root.bind('p', lambda e: self.tipo_var.set('p'))
+        self.root.bind('e', lambda e: self.tipo_var.set('e'))
+        
+        # Canvas y scrollbars (mismo código que antes)
         preview_frame = ttk.Frame(main_frame)
         preview_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Scrollbars
         self.v_scrollbar = ttk.Scrollbar(preview_frame, orient="vertical")
         self.h_scrollbar = ttk.Scrollbar(preview_frame, orient="horizontal")
         
-        # Canvas
         self.canvas = Canvas(
             preview_frame,
             bg='white',
@@ -254,15 +258,41 @@ class PreviewWindow:
             xscrollcommand=self.h_scrollbar.set
         )
         
-        # Configurar scrollbars
         self.v_scrollbar.config(command=self.canvas.yview)
         self.h_scrollbar.config(command=self.canvas.xview)
         
-        # Posicionar elementos
         self.v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)  
+
+    def save_and_next(self):
+        # Guardar datos de la página actual
+        page_info = {
+            'page_number': self.current_page,
+            'type': self.tipo_var.get(),
+            'subpartida': self.subpartida_var.get() if self.tipo_var.get() == 'p' else None
+        }
         
+        # Si es una página nueva, añadirla; si existe, actualizarla
+        if self.current_page >= len(self.page_data):
+            self.page_data.append(page_info)
+        else:
+            self.page_data[self.current_page] = page_info
+        
+        # Ir a la siguiente página
+        if self.current_page < self.pdf_document.page_count - 1:
+            self.current_page += 1
+            self.update_page_display()
+            
+            # Cargar datos guardados si existen
+            if self.current_page < len(self.page_data):
+                saved_data = self.page_data[self.current_page]
+                self.tipo_var.set(saved_data['type'])
+                if saved_data['subpartida']:
+                    self.subpartida_var.set(saved_data['subpartida'])
+                else:
+                    self.subpartida_var.set('')
+
     def load_pdf(self):
         try:
             self.pdf_document = fitz.open(self.input_path)
@@ -277,7 +307,7 @@ class PreviewWindow:
             
             # Use default language if Spanish not available
             try:
-                text = pytesseract.image_to_string(img, lang='spa')
+                text = pytesseract.image_to_string(img, lang='eng')
             except pytesseract.TesseractError:
                 text = pytesseract.image_to_string(img)
             
@@ -312,16 +342,22 @@ class PreviewWindow:
                     potential_subpartida = match.group(1).strip()
                     if self.validate_subpartida_format(potential_subpartida):
                         print(f"Subpartida encontrada: {potential_subpartida}")
-                        self.subpartida_numbers.append(potential_subpartida)
-                        self.page_types.append('p')
+                        self.page_data.append({
+                            'page_number': page_num,
+                            'type': 'p',
+                            'subpartida': potential_subpartida
+                        })
                         found_subpartida = True
                         break
                 if found_subpartida:
                     break
 
             if not found_subpartida:
-                self.backups.append([page_num])
-                self.page_types.append('e')
+                self.page_data.append({
+                    'page_number': page_num,
+                    'type': 'e',
+                    'subpartida': None
+                })
                  
     def validate_subpartida_format(self, subpartida):
         """
@@ -391,23 +427,19 @@ class PreviewWindow:
             if not found_subpartida:
                 print("No se detectó subpartida en esta página")  # Debug
             
-            # Actualizar el tipo de página
-            if self.current_page < len(self.page_types):
-                current_type = self.page_types[self.current_page]
-                self.tipo_var.set(current_type)
-                print(f"Tipo de página establecido: {current_type}")  # Debug
-            
-            # Actualizar el número de subpartida si existe
-            subpartida_index = self.get_subpartida_index(self.current_page)
-            if subpartida_index >= 0 and subpartida_index < len(self.subpartida_numbers):
-                current_subpartida = self.subpartida_numbers[subpartida_index]
-                if not found_subpartida:  # Solo actualizar si no se encontró una nueva
-                    self.subpartida_var.set(current_subpartida)
-                print(f"Subpartida del índice: {current_subpartida}")  # Debug
+            # Actualizar el tipo de página y subpartida si existen
+            if self.current_page < len(self.page_data):
+                current_data = self.page_data[self.current_page]
+                self.tipo_var.set(current_data['type'])
+                if current_data['subpartida']:
+                    self.subpartida_var.set(current_data['subpartida'])
+                else:
+                    self.subpartida_var.set('')
             
             # Asegurar que los widgets estén visibles
             self.subpartida_entry.pack(side=tk.LEFT, padx=5)
-            self.tipo_entry.pack(side=tk.LEFT, padx=5)
+            self.radio_principal.pack(side=tk.LEFT, padx=2)
+            self.radio_espaldar.pack(side=tk.LEFT, padx=2)
             
             # Configurar el botón de guardar
             if self.current_page == self.pdf_document.page_count - 1:
@@ -419,13 +451,6 @@ class PreviewWindow:
             error_msg = f"Error en update_page_display: {str(e)}"
             print(error_msg)  # Debug
             messagebox.showerror("Error", f"Error al actualizar la visualización: {str(e)}")
-          
-    def get_subpartida_index(self, page_num):
-        # Encontrar a qué subpartida pertenece esta página
-        for i, backups in enumerate(self.backups):
-            if page_num == i or page_num in backups:
-                return i
-        return -1
         
     def next_page(self):
         if self.pdf_document and self.current_page < self.pdf_document.page_count - 1:
@@ -492,18 +517,6 @@ class PreviewWindow:
                 self.subpartida_var.set(detected_number)
                 print(f"Número detectado: {detected_number}")
             
-            # Display the selected area in a temporary window
-            temp_window = tk.Toplevel(self.root)
-            temp_window.title("Selected Area")
-            temp_window.geometry("+0+0")  # Position at the bottom left
-            temp_image = ImageTk.PhotoImage(Image.fromarray(processed_image))
-            temp_label = ttk.Label(temp_window, image=temp_image)
-            temp_label.image = temp_image
-            temp_label.pack()
-            
-            # Automatically close the temporary window after a short delay
-            self.root.after(3000, temp_window.destroy)
-            
             self.canvas.delete(self.rect)
             
         except Exception as e:
@@ -512,33 +525,27 @@ class PreviewWindow:
     def save_pdfs(self):
         try:
             input_pdf = PyPDF2.PdfReader(self.input_path)
-            current_year = datetime.now().year
+            current_subpartida = None
+            current_pages = []
+            subpartida_counts = {}  # Para contar copias
             
-            # Asegurarse de que tenemos la misma cantidad de subpartidas y backups
-            while len(self.backups) < len(self.subpartida_numbers):
-                self.backups.append([])
+            # Procesar todas las páginas
+            for page_info in self.page_data:
+                if page_info['type'] == 'p':
+                    # Si tenemos páginas acumuladas, guardar el PDF anterior
+                    if current_subpartida and current_pages:
+                        self.save_single_pdf(input_pdf, current_subpartida, current_pages, subpartida_counts)
+                    
+                    # Iniciar nuevo grupo
+                    current_subpartida = page_info['subpartida']
+                    current_pages = [page_info['page_number']]
+                else:  # Espaldar
+                    if current_pages:  # Añadir a grupo actual
+                        current_pages.append(page_info['page_number'])
             
-            for i, subpartida in enumerate(self.subpartida_numbers):
-                output = PyPDF2.PdfWriter()
-                
-                # Añadir página principal
-                if i < len(input_pdf.pages):
-                    output.add_page(input_pdf.pages[i])
-                
-                # Añadir páginas de respaldo
-                if i < len(self.backups):
-                    for backup_page in self.backups[i]:
-                        if backup_page < len(input_pdf.pages):
-                            output.add_page(input_pdf.pages[backup_page])
-                
-                # Crear nombre de archivo con subpartida y año
-                output_filename = os.path.join(
-                    self.output_path,
-                    f"subpartida_{subpartida}_{current_year}.pdf"
-                )
-                
-                with open(output_filename, "wb") as output_file:
-                    output.write(output_file)
+            # Guardar el último grupo
+            if current_subpartida and current_pages:
+                self.save_single_pdf(input_pdf, current_subpartida, current_pages, subpartida_counts)
             
             messagebox.showinfo("Éxito", "PDFs generados correctamente")
             self.root.destroy()
@@ -547,6 +554,31 @@ class PreviewWindow:
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar los PDFs: {str(e)}")
 
+
+    def save_single_pdf(self, input_pdf, subpartida, pages, subpartida_counts):
+        # Incrementar contador para esta subpartida
+        subpartida_counts[subpartida] = subpartida_counts.get(subpartida, 0) + 1
+        copy_number = subpartida_counts[subpartida]
+        
+        # Crear nuevo PDF
+        output = PyPDF2.PdfWriter()
+        
+        # Añadir todas las páginas del grupo
+        for page_num in pages:
+            if page_num < len(input_pdf.pages):
+                output.add_page(input_pdf.pages[page_num])
+        
+        # Generar nombre de archivo
+        filename = f"subpartida_{subpartida}"
+        if copy_number > 1:
+            filename += f"_copia_{copy_number}"
+        filename += ".pdf"
+        
+        output_path = os.path.join(self.output_path, filename)
+        
+        # Guardar PDF
+        with open(output_path, "wb") as output_file:
+            output.write(output_file)
 
 if __name__ == "__main__":
     root = tk.Tk()
