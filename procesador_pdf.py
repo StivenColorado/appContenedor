@@ -6,11 +6,13 @@ from tkinter import StringVar, Canvas
 import fitz
 import re
 from PIL import Image, ImageTk
-from datetime import datetime
 import pytesseract
 import platform
 import cv2
 import numpy as np
+import pandas as pd
+from PyPDF2 import PdfMerger
+
 
 # Set TESSDATA_PREFIX environment variable
 os.environ['TESSDATA_PREFIX'] = '/usr/local/share/tessdata/'
@@ -21,9 +23,12 @@ class PDFProcessorApp:
         self.setup_window()
         self.create_widgets()
         self.ocr_lang = 'eng'
+        self.excel_path = None
+        self.excel_data = None
+        
     def setup_window(self):
-        self.root.title("Selección de Archivo PDF")
-        self.root.geometry("500x300")
+        self.root.title("Procesador de PDF y Excel")
+        self.root.geometry("600x400")
         self.center_window()
         
     def center_window(self):
@@ -33,7 +38,7 @@ class PDFProcessorApp:
         x = (self.root.winfo_screenwidth() // 2) - (width // 2)
         y = (self.root.winfo_screenheight() // 2) - (height // 2)
         self.root.geometry(f'{width}x{height}+{x}+{y}')
-        
+
     def create_widgets(self):
         main_frame = ttk.Frame(self.root, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -46,7 +51,25 @@ class PDFProcessorApp:
         )
         title_label.pack(pady=20)
         
-        # Input file
+        # Excel file input
+        self.excel_path_var = StringVar()
+        excel_label = ttk.Label(main_frame, text="Archivo Excel:", font=('Helvetica', 10))
+        excel_label.pack(anchor=tk.W)
+        
+        excel_frame = ttk.Frame(main_frame)
+        excel_frame.pack(fill=tk.X, pady=5)
+        
+        self.excel_entry = ttk.Entry(excel_frame, textvariable=self.excel_path_var, state='readonly')
+        self.excel_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        
+        excel_button = ttk.Button(
+            excel_frame,
+            text="Seleccionar Excel",
+            command=self.select_excel_file
+        )
+        excel_button.pack(side=tk.RIGHT)
+        
+        # Input PDF file
         self.input_path = StringVar()
         input_label = ttk.Label(main_frame, text="Archivo PDF:", font=('Helvetica', 10))
         input_label.pack(anchor=tk.W)
@@ -59,7 +82,7 @@ class PDFProcessorApp:
         
         input_button = ttk.Button(
             input_frame,
-            text="Seleccionar archivo",
+            text="Seleccionar PDF",
             command=self.select_input_file
         )
         input_button.pack(side=tk.RIGHT)
@@ -89,33 +112,229 @@ class PDFProcessorApp:
             command=self.start_processing
         )
         self.process_button.pack(pady=20)
-        
     def select_input_file(self):
-        filename = filedialog.askopenfilename(
-            title="Seleccionar archivo PDF",
-            filetypes=[("PDF files", "*.pdf")]
-        )
-        if filename:
-            self.input_path.set(filename)
+        try:
+            file_types = [('PDF files', '*.pdf')]
+            filename = filedialog.askopenfilename(
+                title="Seleccionar archivo PDF",
+                filetypes=file_types,
+                parent=self.root
+            )
             
+            if filename:
+                self.input_path.set(filename)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
+
+    def find_header_row(self, df):
+        """
+        Busca la fila que contiene los encabezados requeridos en el DataFrame,
+        incluso cuando hay filas de resumen al inicio del archivo.
+        """
+        required_columns = ['CLIENTE', 'SUBPARTIDA', 'DESCRIPCION DECLARADA - PREINSPECCION']
+        
+        for idx, row in df.iterrows():
+            row_str = ' '.join(str(val).upper().strip() for val in row if pd.notna(val))
+            matches = sum(req_col in row_str for req_col in required_columns)
+            if matches >= len(required_columns):
+                return idx
+        return None
+
+    def select_excel_file(self):
+        try:
+            file_types = [('Excel files', '*.xlsx'), ('Excel files', '*.xls')]
+            filename = filedialog.askopenfilename(
+                title="Seleccionar archivo Excel",
+                filetypes=file_types,
+                parent=self.root
+            )
+            
+            if filename:
+                self.excel_path_var.set(filename)
+                try:
+                    # Leer las primeras 20 filas de la hoja "PROFORMA" sin especificar header
+                    df_headers = pd.read_excel(filename, sheet_name='PROFORMA', header=None, nrows=20)
+                    
+                    # Encontrar la fila que contiene los encabezados
+                    header_row = self.find_header_row(df_headers)
+                    
+                    if header_row is not None:
+                        # Leer el Excel usando la fila de encabezados encontrada
+                        self.excel_data = pd.read_excel(filename, sheet_name='PROFORMA', header=header_row)
+                        
+                        # Verificar las columnas requeridas de manera más flexible
+                        required_columns = ['CLIENTE', 'SUBPARTIDA', 'DESCRIPCION DECLARADA - PREINSPECCION']
+                        found_columns = []
+                        column_mapping = {}
+                        
+                        for existing_col in self.excel_data.columns:
+                            existing_col_upper = str(existing_col).upper().strip()
+                            cleaned_col = re.sub(r'[^A-Z]', '', existing_col_upper)  # Eliminar caracteres no alfabéticos
+                            for req_col in required_columns:
+                                cleaned_req_col = re.sub(r'[^A-Z]', '', req_col)  # Eliminar caracteres no alfabéticos
+                                if cleaned_req_col in cleaned_col:
+                                    column_mapping[existing_col] = req_col
+                                    found_columns.append(req_col)
+                                    break
+                        
+                        missing_columns = set(required_columns) - set(found_columns)
+                        
+                        if missing_columns:
+                            messagebox.showerror("Error", 
+                                f"Faltan las siguientes columnas en el archivo Excel: {', '.join(missing_columns)}")
+                            self.excel_path_var.set("")
+                            self.excel_data = None
+                        else:
+                            # Renombrar las columnas usando el mapeo
+                            self.excel_data = self.excel_data.rename(columns=column_mapping)
+                            
+                    else:
+                        messagebox.showerror("Error", "No se encontraron los encabezados requeridos en el archivo Excel")
+                        self.excel_path_var.set("")
+                        self.excel_data = None
+                        
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error al leer el archivo Excel: {str(e)}")
+                    self.excel_path_var.set("")
+                    self.excel_data = None
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
+    def process_excel_data(self):
+        if self.excel_data is None:
+            messagebox.showerror("Error", "No se ha cargado un archivo Excel válido")
+            return
+
+        try:
+            # Procesar por cliente
+            for cliente in self.excel_data['CLIENTE'].dropna().unique():
+                print(f"Procesando cliente: {cliente}")  # Debug
+                cliente_data = self.excel_data[self.excel_data['CLIENTE'] == cliente]
+                subpartidas = []
+                
+                for _, row in cliente_data.iterrows():
+                    # Limpiar subpartida de caracteres especiales
+                    subpartida = re.sub(r'[^0-9]', '', str(row['SUBPARTIDA']))
+                    if subpartida:
+                        subpartidas.append({
+                            'numero': subpartida,
+                            'descripcion': row.get('DESCRIPCION DECLARADA - PREINSPECCION', '')
+                        })
+                
+                print(f"Subpartidas para {cliente}: {subpartidas}")  # Debug
+                
+                if subpartidas:
+                    self.create_client_pdf(cliente, subpartidas)
+                    
+            messagebox.showinfo("Éxito", "Proceso completado correctamente")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al procesar el archivo Excel: {str(e)}")
+
     def select_output_directory(self):
-        directory = filedialog.askdirectory(title="Seleccionar carpeta de salida")
-        if directory:
-            self.output_path.set(directory)
+        try:
+            directory = filedialog.askdirectory(
+                title="Seleccionar carpeta de salida",
+                parent=self.root
+            )
             
+            if directory:
+                self.output_path.set(directory)
+                # Crear la carpeta declaraciones_separadas
+                separated_dir = os.path.join(directory, "declaraciones_separadas")
+                if not os.path.exists(separated_dir):
+                    os.makedirs(separated_dir)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al seleccionar la carpeta: {str(e)}")
+    
+    def create_client_pdf(self, cliente, subpartidas):
+        merger = PdfMerger()
+        separated_dir = os.path.join(self.output_path.get(), "declaraciones_separadas")
+        
+        for subpartida_info in subpartidas:
+            subpartida = subpartida_info['numero']
+            base_pdf = os.path.join(separated_dir, f"subpartida_{subpartida}.pdf")
+            copy_pdf = os.path.join(separated_dir, f"subpartida_{subpartida}_copia_1.pdf")
+            
+            if os.path.exists(base_pdf) and os.path.exists(copy_pdf):
+                # Mostrar ventana de selección con descripción
+                selected_pdf = self.show_pdf_selection_window(
+                    base_pdf, 
+                    copy_pdf, 
+                    subpartida_info['descripcion']
+                )
+                if selected_pdf:
+                    merger.append(selected_pdf)
+            elif os.path.exists(base_pdf):
+                merger.append(base_pdf)
+            elif os.path.exists(copy_pdf):
+                merger.append(copy_pdf)
+        
+        if len(merger.pages) > 0:
+            # Crear nombre de archivo válido para Windows
+            cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', cliente)
+            output_path = os.path.join(self.output_path.get(), f"{cliente_filename}.pdf")
+            merger.write(output_path)
+            print(f"Archivo PDF creado para {cliente}: {output_path}")  # Debug
+        
+        merger.close()
+
+    def show_pdf_selection_window(self, pdf1_path, pdf2_path, descripcion):
+        selection_window = tk.Toplevel(self.root)
+        selection_window.title("Seleccionar PDF")
+        selection_window.geometry("800x600")
+        
+        # Mostrar descripción
+        desc_label = ttk.Label(selection_window, text=f"Descripción: {descripcion}", wraplength=700)
+        desc_label.pack(pady=10)
+        
+        # Frame para los PDFs
+        pdf_frame = ttk.Frame(selection_window)
+        pdf_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Variables para almacenar la selección
+        selected_pdf = tk.StringVar()
+        
+        # Crear dos canvas para mostrar los PDFs
+        left_frame = ttk.LabelFrame(pdf_frame, text="PDF Original")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+        
+        right_frame = ttk.LabelFrame(pdf_frame, text="PDF Copia")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5)
+        
+        # Botones de selección
+        ttk.Radiobutton(selection_window, text="Seleccionar Original", 
+                       variable=selected_pdf, value=pdf1_path).pack(pady=5)
+        ttk.Radiobutton(selection_window, text="Seleccionar Copia", 
+                       variable=selected_pdf, value=pdf2_path).pack(pady=5)
+        
+        # Botón de confirmación
+        def confirm_selection():
+            selection_window.selected_pdf = selected_pdf.get()
+            selection_window.destroy()
+            
+        ttk.Button(selection_window, text="Confirmar", 
+                  command=confirm_selection).pack(pady=10)
+        
+        # Esperar a que se cierre la ventana
+        self.root.wait_window(selection_window)
+        
+        return getattr(selection_window, 'selected_pdf', None)
+
     def start_processing(self):
-        if not self.input_path.get() or not self.output_path.get():
-            messagebox.showerror("Error", "Por favor seleccione el archivo PDF y la carpeta de salida")
+        if not self.validate_inputs():
             return
             
-        self.root.withdraw()  # Ocultar ventana actual
-        PreviewWindow(self.input_path.get(), self.output_path.get(), self)
-        
-    def show(self):
-        self.root.deiconify()  # Mostrar ventana nuevamente
-        
-    def run(self):
-        self.root.mainloop()
+        try:
+            self.root.withdraw()
+            PreviewWindow(self.input_path.get(), self.output_path.get(), self)
+        except Exception as e:
+            self.root.deiconify()
+            messagebox.showerror("Error", f"Error al iniciar el procesamiento: {str(e)}")
+
+    def validate_inputs(self):
+        if not all([self.input_path.get(), self.output_path.get(), self.excel_path_var.get()]):
+            messagebox.showerror("Error", "Por favor seleccione todos los archivos necesarios")
+            return False
+        return True
 
 class PreviewWindow:
     def __init__(self, input_path, output_path, parent_window):
@@ -234,8 +453,11 @@ class PreviewWindow:
         action_frame = ttk.Frame(control_frame)
         action_frame.pack(side=tk.RIGHT)
         
-        self.select_button = ttk.Button(action_frame, text="Seleccionar Texto", command=self.select_text)
-        self.select_button.pack(side=tk.RIGHT, padx=5)
+        self.zoom_in_button = ttk.Button(action_frame, text="Aumentar Zoom", command=self.zoom_in)
+        self.zoom_in_button.pack(side=tk.RIGHT, padx=5)
+        
+        self.zoom_out_button = ttk.Button(action_frame, text="Disminuir Zoom", command=self.zoom_out)
+        self.zoom_out_button.pack(side=tk.RIGHT, padx=5)
         
         self.save_button = ttk.Button(action_frame, text="Guardar Todo", command=self.save_pdfs)
         self.save_button.pack(side=tk.RIGHT, padx=5)
@@ -255,7 +477,8 @@ class PreviewWindow:
             preview_frame,
             bg='white',
             yscrollcommand=self.v_scrollbar.set,
-            xscrollcommand=self.h_scrollbar.set
+            xscrollcommand=self.h_scrollbar.set,
+            cursor="pencil"
         )
         
         self.v_scrollbar.config(command=self.canvas.yview)
@@ -263,7 +486,20 @@ class PreviewWindow:
         
         self.v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)  
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Bind mouse events for selection
+        self.canvas.bind("<ButtonPress-1>", self.on_button_press)
+        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
+
+    def zoom_in(self):
+        self.zoom_factor += 0.1
+        self.update_page_display()
+
+    def zoom_out(self):
+        self.zoom_factor -= 0.1
+        self.update_page_display()
 
     def save_and_next(self):
         # Guardar datos de la página actual
@@ -462,11 +698,6 @@ class PreviewWindow:
             self.current_page -= 1
             self.update_page_display()
             
-    def select_text(self):
-        self.canvas.bind("<ButtonPress-1>", self.on_button_press)
-        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
-        self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
-        
     def on_button_press(self, event):
         self.start_x = self.canvas.canvasx(event.x)
         self.start_y = self.canvas.canvasy(event.y)
@@ -549,11 +780,10 @@ class PreviewWindow:
             
             messagebox.showinfo("Éxito", "PDFs generados correctamente")
             self.root.destroy()
-            self.parent_window.show()
+            self.parent_window.root.deiconify()  # Mostrar la ventana principal
             
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar los PDFs: {str(e)}")
-
 
     def save_single_pdf(self, input_pdf, subpartida, pages, subpartida_counts):
         # Incrementar contador para esta subpartida
@@ -581,6 +811,9 @@ class PreviewWindow:
             output.write(output_file)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = PDFProcessorApp(root)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        app = PDFProcessorApp(root)
+        root.mainloop()
+    except Exception as e:
+        print(f"Error al iniciar la aplicación: {str(e)}")
