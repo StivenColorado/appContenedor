@@ -25,6 +25,7 @@ class PDFProcessorApp:
         self.ocr_lang = 'eng'
         self.excel_path = None
         self.excel_data = None
+        self.clientes_info = {}
         
     def setup_window(self):
         self.root.title("Procesador de PDF y Excel")
@@ -112,6 +113,7 @@ class PDFProcessorApp:
             command=self.start_processing
         )
         self.process_button.pack(pady=20)
+
     def select_input_file(self):
         try:
             file_types = [('PDF files', '*.pdf')]
@@ -187,6 +189,7 @@ class PDFProcessorApp:
                         else:
                             # Renombrar las columnas usando el mapeo
                             self.excel_data = self.excel_data.rename(columns=column_mapping)
+                            self.detect_clients()
                             
                     else:
                         messagebox.showerror("Error", "No se encontraron los encabezados requeridos en el archivo Excel")
@@ -199,6 +202,32 @@ class PDFProcessorApp:
                     self.excel_data = None
         except Exception as e:
             messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
+
+
+    def detect_clients(self):
+        """
+        Detecta los clientes en el archivo Excel y recopila los valores de SUBPARTIDA y DESCRIPCION DECLARADA - PREINSPECCION para cada cliente.
+        """
+        self.clientes_info = {}
+        for cliente in self.excel_data['CLIENTE'].dropna().unique():
+            cliente_data = self.excel_data[self.excel_data['CLIENTE'] == cliente]
+            subpartidas = []
+            for _, row in cliente_data.iterrows():
+                subpartida = re.sub(r'[^0-9]', '', str(row['SUBPARTIDA']))
+                descripcion = row.get('DESCRIPCION DECLARADA - PREINSPECCION', '')
+                if subpartida:
+                    subpartidas.append({
+                        'numero': subpartida,
+                        'descripcion': descripcion
+                    })
+            self.clientes_info[cliente] = subpartidas
+        
+        # Mostrar la información en consola
+        for cliente, info in self.clientes_info.items():
+            print(f"Cliente: {cliente}")
+            for subpartida_info in info:
+                print(f"  Subpartida: {subpartida_info['numero']}, Descripción: {subpartida_info['descripcion']}")
+
     def process_excel_data(self):
         if self.excel_data is None:
             messagebox.showerror("Error", "No se ha cargado un archivo Excel válido")
@@ -206,20 +235,8 @@ class PDFProcessorApp:
 
         try:
             # Procesar por cliente
-            for cliente in self.excel_data['CLIENTE'].dropna().unique():
+            for cliente, subpartidas in self.clientes_info.items():
                 print(f"Procesando cliente: {cliente}")  # Debug
-                cliente_data = self.excel_data[self.excel_data['CLIENTE'] == cliente]
-                subpartidas = []
-                
-                for _, row in cliente_data.iterrows():
-                    # Limpiar subpartida de caracteres especiales
-                    subpartida = re.sub(r'[^0-9]', '', str(row['SUBPARTIDA']))
-                    if subpartida:
-                        subpartidas.append({
-                            'numero': subpartida,
-                            'descripcion': row.get('DESCRIPCION DECLARADA - PREINSPECCION', '')
-                        })
-                
                 print(f"Subpartidas para {cliente}: {subpartidas}")  # Debug
                 
                 if subpartidas:
@@ -229,6 +246,7 @@ class PDFProcessorApp:
         except Exception as e:
             messagebox.showerror("Error", f"Error al procesar el archivo Excel: {str(e)}")
 
+    
     def select_output_directory(self):
         try:
             directory = filedialog.askdirectory(
@@ -254,6 +272,8 @@ class PDFProcessorApp:
             base_pdf = os.path.join(separated_dir, f"subpartida_{subpartida}.pdf")
             copy_pdf = os.path.join(separated_dir, f"subpartida_{subpartida}_copia_1.pdf")
             
+            print(f"Buscando archivos PDF para subpartida {subpartida}")  # Debug
+            
             if os.path.exists(base_pdf) and os.path.exists(copy_pdf):
                 # Mostrar ventana de selección con descripción
                 selected_pdf = self.show_pdf_selection_window(
@@ -271,7 +291,7 @@ class PDFProcessorApp:
         if len(merger.pages) > 0:
             # Crear nombre de archivo válido para Windows
             cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', cliente)
-            output_path = os.path.join(self.output_path.get(), f"{cliente_filename}.pdf")
+            output_path = os.path.join(self.output_path.get(), "declaraciones_separadas", f"{cliente_filename}.pdf")
             merger.write(output_path)
             print(f"Archivo PDF creado para {cliente}: {output_path}")  # Debug
         
@@ -449,15 +469,19 @@ class PreviewWindow:
         self.radio_espaldar = ttk.Radiobutton(tipo_frame, text="Espaldar", value='e', variable=self.tipo_var)
         self.radio_espaldar.pack(side=tk.LEFT, padx=2)
         
+        # Botones de zoom
+        zoom_frame = ttk.Frame(control_frame)
+        zoom_frame.pack(side=tk.RIGHT, padx=20)
+        
+        self.zoom_in_button = ttk.Button(zoom_frame, text="Aumentar Zoom", command=self.zoom_in)
+        self.zoom_in_button.pack(side=tk.LEFT, padx=5)
+        
+        self.zoom_out_button = ttk.Button(zoom_frame, text="Disminuir Zoom", command=self.zoom_out)
+        self.zoom_out_button.pack(side=tk.LEFT, padx=5)
+        
         # Botones de acción
         action_frame = ttk.Frame(control_frame)
         action_frame.pack(side=tk.RIGHT)
-        
-        self.zoom_in_button = ttk.Button(action_frame, text="Aumentar Zoom", command=self.zoom_in)
-        self.zoom_in_button.pack(side=tk.RIGHT, padx=5)
-        
-        self.zoom_out_button = ttk.Button(action_frame, text="Disminuir Zoom", command=self.zoom_out)
-        self.zoom_out_button.pack(side=tk.RIGHT, padx=5)
         
         self.save_button = ttk.Button(action_frame, text="Guardar Todo", command=self.save_pdfs)
         self.save_button.pack(side=tk.RIGHT, padx=5)
@@ -478,7 +502,7 @@ class PreviewWindow:
             bg='white',
             yscrollcommand=self.v_scrollbar.set,
             xscrollcommand=self.h_scrollbar.set,
-            cursor="pencil"
+            cursor="pencil"  # Cambiar el cursor a lápiz
         )
         
         self.v_scrollbar.config(command=self.canvas.yview)
@@ -488,17 +512,16 @@ class PreviewWindow:
         self.h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Bind mouse events for selection
+        # Configurar eventos del mouse para selección de texto
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
-
     def zoom_in(self):
-        self.zoom_factor += 0.1
+        self.zoom_factor += 0.3
         self.update_page_display()
 
     def zoom_out(self):
-        self.zoom_factor -= 0.1
+        self.zoom_factor = max(0.3, self.zoom_factor - 0.3)
         self.update_page_display()
 
     def save_and_next(self):
@@ -687,7 +710,6 @@ class PreviewWindow:
             error_msg = f"Error en update_page_display: {str(e)}"
             print(error_msg)  # Debug
             messagebox.showerror("Error", f"Error al actualizar la visualización: {str(e)}")
-        
     def next_page(self):
         if self.pdf_document and self.current_page < self.pdf_document.page_count - 1:
             self.current_page += 1
@@ -752,7 +774,7 @@ class PreviewWindow:
             
         except Exception as e:
             print(f"Error en OCR: {str(e)}")
-            messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")      
+            messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")     
     def save_pdfs(self):
         try:
             input_pdf = PyPDF2.PdfReader(self.input_path)
@@ -804,7 +826,7 @@ class PreviewWindow:
             filename += f"_copia_{copy_number}"
         filename += ".pdf"
         
-        output_path = os.path.join(self.output_path, filename)
+        output_path = os.path.join(self.output_path, "declaraciones_separadas", filename)
         
         # Guardar PDF
         with open(output_path, "wb") as output_file:
