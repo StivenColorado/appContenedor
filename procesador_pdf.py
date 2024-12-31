@@ -260,12 +260,17 @@ class PDFProcessorApp:
                 separated_dir = os.path.join(directory, "declaraciones_separadas")
                 if not os.path.exists(separated_dir):
                     os.makedirs(separated_dir)
+                # Crear la carpeta separados_por_cliente
+                clients_dir = os.path.join(directory, "separados_por_cliente")
+                if not os.path.exists(clients_dir):
+                    os.makedirs(clients_dir)
         except Exception as e:
             messagebox.showerror("Error", f"Error al seleccionar la carpeta: {str(e)}")
     
     def create_client_pdf(self, cliente, subpartidas):
         merger = PdfMerger()
         separated_dir = os.path.join(self.output_path.get(), "declaraciones_separadas")
+        clients_dir = os.path.join(self.output_path.get(), "separados_por_cliente")
         
         for subpartida_info in subpartidas:
             subpartida = subpartida_info['numero']
@@ -274,24 +279,15 @@ class PDFProcessorApp:
             
             print(f"Buscando archivos PDF para subpartida {subpartida}")  # Debug
             
-            if os.path.exists(base_pdf) and os.path.exists(copy_pdf):
-                # Mostrar ventana de selección con descripción
-                selected_pdf = self.show_pdf_selection_window(
-                    base_pdf, 
-                    copy_pdf, 
-                    subpartida_info['descripcion']
-                )
-                if selected_pdf:
-                    merger.append(selected_pdf)
-            elif os.path.exists(base_pdf):
+            if os.path.exists(base_pdf):
                 merger.append(base_pdf)
-            elif os.path.exists(copy_pdf):
+            if os.path.exists(copy_pdf):
                 merger.append(copy_pdf)
         
         if len(merger.pages) > 0:
             # Crear nombre de archivo válido para Windows
             cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', cliente)
-            output_path = os.path.join(self.output_path.get(), "declaraciones_separadas", f"{cliente_filename}.pdf")
+            output_path = os.path.join(clients_dir, f"{cliente_filename}.pdf")
             merger.write(output_path)
             print(f"Archivo PDF creado para {cliente}: {output_path}")  # Debug
         
@@ -663,6 +659,7 @@ class PreviewWindow:
             
             # Obtener el texto completo de la página
             text = page.get_text("text")
+            text = text.decode('utf-8') if isinstance(text, bytes) else text
             print(f"Texto completo de la página {self.current_page + 1}:")
             print(text)  # Debug: mostrar todo el texto de la página
             
@@ -710,6 +707,7 @@ class PreviewWindow:
             error_msg = f"Error en update_page_display: {str(e)}"
             print(error_msg)  # Debug
             messagebox.showerror("Error", f"Error al actualizar la visualización: {str(e)}")
+
     def next_page(self):
         if self.pdf_document and self.current_page < self.pdf_document.page_count - 1:
             self.current_page += 1
@@ -802,6 +800,7 @@ class PreviewWindow:
             
             messagebox.showinfo("Éxito", "PDFs generados correctamente")
             self.root.destroy()
+            self.parent_window.process_excel_data()  # Procesar los datos del Excel después de guardar los PDFs separados
             self.parent_window.root.deiconify()  # Mostrar la ventana principal
             
         except Exception as e:
@@ -826,7 +825,7 @@ class PreviewWindow:
             filename += f"_copia_{copy_number}"
         filename += ".pdf"
         
-        output_path = os.path.join(self.output_path, "declaraciones_separadas", filename)
+        output_path = os.path.join(self.parent_window.output_path.get(), "declaraciones_separadas", filename)
         
         # Guardar PDF
         with open(output_path, "wb") as output_file:
