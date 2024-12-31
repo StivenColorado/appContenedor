@@ -637,6 +637,7 @@ class PreviewWindow:
 
         return True
     
+    
     def update_page_display(self):
         if not self.pdf_document:
             return
@@ -659,7 +660,8 @@ class PreviewWindow:
             
             # Obtener el texto completo de la página
             text = page.get_text("text")
-            text = text.decode('utf-8') if isinstance(text, bytes) else text
+            if isinstance(text, bytes):
+                text = text.decode('utf-8')
             print(f"Texto completo de la página {self.current_page + 1}:")
             print(text)  # Debug: mostrar todo el texto de la página
             
@@ -707,7 +709,7 @@ class PreviewWindow:
             error_msg = f"Error en update_page_display: {str(e)}"
             print(error_msg)  # Debug
             messagebox.showerror("Error", f"Error al actualizar la visualización: {str(e)}")
-
+    
     def next_page(self):
         if self.pdf_document and self.current_page < self.pdf_document.page_count - 1:
             self.current_page += 1
