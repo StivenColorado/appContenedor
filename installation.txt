@@ -1,3 +1,15 @@
+
+#instalar tesseract url:
+https://github.com/UB-Mannheim/tesseract/wiki
+
+#instalar python:
+https://www.python.org/
+
+#agregar al PATH luego de instalar tesseract
+C:\Program Files\Tesseract-OCR
+C:\Users\mpc\AppData\Local\Programs\Python\Python313
+C:\Users\mpc\AppData\Local\Programs\Python\Python313\Scripts
+
 # En Windows
 python -m venv venv
 venv\Scripts\activate
@@ -12,8 +24,6 @@ pip install pandas numpy openpyxl fpdf Pillow PyMuPDF python-docx pytesseract pd
 python excel_processor.py
 
 pip install -r requirements.txt
-
-
 
 Crear el ejecutable
 Para crear un ejecutable que puedas distribuir:
