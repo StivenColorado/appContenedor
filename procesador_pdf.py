@@ -17,52 +17,75 @@ import xlrd
 # Set TESSDATA_PREFIX environment variable
 os.environ['TESSDATA_PREFIX'] = '/usr/local/share/tessdata/'
 
-def load_excel_data_from_sheet(filename, sheet_name, max_rows=20):
+def load_excel_data_from_sheet(filename, sheet_name, max_rows=50):
     """
     Carga los datos de una hoja específica del archivo Excel, incluyendo valores calculados.
+    Ahora busca en más filas para encontrar los encabezados.
     """
     file_extension = os.path.splitext(filename)[1].lower()
     data = []
 
-    if file_extension == '.xlsx':
-        # Leer con openpyxl usando `data_only=True`
-        wb = load_workbook(filename, data_only=True)
-        if sheet_name not in wb.sheetnames:
-            raise ValueError(f"La hoja '{sheet_name}' no se encuentra en el archivo.")
-        
-        ws = wb[sheet_name]
-        data = list(ws.values)[:max_rows]  # Cargar máximo `max_rows`
-    
-    elif file_extension == '.xls':
-        # Leer con xlrd
-        book = xlrd.open_workbook(filename)
-        if sheet_name not in book.sheet_names():
-            raise ValueError(f"La hoja '{sheet_name}' no se encuentra en el archivo.")
-        
-        sheet = book.sheet_by_name(sheet_name)
-        data = [sheet.row_values(rowx) for rowx in range(min(sheet.nrows, max_rows))]
-    
-    else:
-        raise ValueError("Formato de archivo no soportado. Use .xlsx o .xls")
+    try:
+        if file_extension == '.xlsx':
+            print(f"Cargando archivo XLSX: {filename}, hoja: {sheet_name}")
+            wb = load_workbook(filename, data_only=True)
+            sheet = wb[sheet_name]
+            for row in sheet.iter_rows(min_row=1, max_row=max_rows, values_only=True):
+                data.append(row)
+        elif file_extension == '.xls':
+            print(f"Cargando archivo XLS: {filename}, hoja: {sheet_name}")
+            wb = xlrd.open_workbook(filename)
+            sheet = wb.sheet_by_name(sheet_name)
+            for row_idx in range(min(max_rows, sheet.nrows)):
+                data.append(tuple(sheet.row_values(row_idx)))
+        else:
+            raise ValueError("Formato de archivo no soportado")
+    except Exception as e:
+        print(f"Error al cargar los datos de la hoja: {str(e)}")
     
     return data
-
 def find_header_row(data, required_columns):
     """
     Encuentra la fila de encabezados basada en las columnas requeridas.
+    Ahora es más flexible en la búsqueda y muestra más información de depuración.
     """
-    for idx, row in enumerate(data):
-        row_str = ' '.join(str(val).upper().strip() for val in row if pd.notna(val))
-        
-        print(f"Procesando fila {idx + 1}: {row_str}")  # Depuración
-        
-        matches = sum(req_col.upper() in row_str for req_col in required_columns)
-        
-        if matches >= len(required_columns):
-            print(f"Encabezados encontrados en la fila {idx + 1}")
-            return idx
+    print("\nBuscando encabezados...")
+    print(f"Columnas requeridas: {required_columns}")
     
-    return None
+    for idx, row in enumerate(data):
+        if row is None:
+            continue
+            
+        print(f"\nAnalizando fila {idx + 1}:")
+        print(f"Contenido de la fila: {row}")
+        
+        # Crear una lista de valores limpiados para comparación
+        row_values = [str(cell).upper().strip() if cell is not None else '' for cell in row]
+        print(f"Valores limpiados: {row_values}")
+        
+        # Buscar coincidencias para cada columna requerida
+        matches = []
+        for required_column in required_columns:
+            required_column_upper = required_column.upper()
+            found = False
+            for cell_value in row_values:
+                # Verificar coincidencia exacta o si la columna requerida está contenida en el valor
+                if cell_value and (required_column_upper == cell_value or required_column_upper in cell_value):
+                    matches.append(required_column)
+                    print(f"Encontrada columna: {required_column}")
+                    found = True
+                    break
+            
+            if not found:
+                print(f"No se encontró la columna: {required_column}")
+        
+        # Si encontramos todas las columnas requeridas
+        if len(matches) == len(required_columns):
+            print(f"\n¡Encabezados encontrados en la fila {idx + 1}!")
+            return idx, row
+    
+    print("\nNo se encontraron todos los encabezados requeridos.")
+    return None, None
 class PDFProcessorApp:
     def __init__(self, root):
         self.root = root
@@ -175,6 +198,7 @@ class PDFProcessorApp:
             messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
 
     # Modificación para imprimir información antes de generar el error
+    
     def select_excel_file(self):
         try:
             file_types = [('Excel files', '*.xlsx'), ('Excel files', '*.xls')]
@@ -192,48 +216,52 @@ class PDFProcessorApp:
                     required_columns = ['CLIENTE', 'SUBPARTIDA', 'DESCRIPCION DECLARADA - PREINSPECCION']
                     
                     # Cargar las primeras filas de la hoja específica
-                    raw_data = load_excel_data_from_sheet(filename, sheet_name, max_rows=20)
+                    raw_data = load_excel_data_from_sheet(filename, sheet_name, max_rows=50)
                     
                     print("Datos cargados para detección de encabezados:")
                     for idx, row in enumerate(raw_data):
                         print(f"Fila {idx + 1}: {row}")
                     
                     # Buscar encabezados
-                    header_row = find_header_row(raw_data, required_columns)
+                    header_row_idx, header_row = find_header_row(raw_data, required_columns)
                     
-                    if header_row is not None:
-                        # Cargar valores calculados del Excel completo
-                        wb = load_workbook(filename, data_only=True)
-                        ws = wb[sheet_name]
-                        data = list(ws.values)
-                        self.excel_data = pd.DataFrame(data[header_row + 1:], columns=data[header_row])
+                    if header_row_idx is not None and header_row is not None:
+                        # Crear un DataFrame con todas las filas después de los encabezados
+                        data_rows = raw_data[header_row_idx + 1:]
+                        # self.excel_data = pd.DataFrame(data_rows, columns=header_row)
+                        self.excel_data = pd.DataFrame(data_rows, columns=list(header_row))
+
+                        # Limpiar los nombres de columnas
+                        self.excel_data.columns = [str(col).strip() for col in self.excel_data.columns]
                         
-                        # Limpiar los nombres de columnas
-                        self.excel_data.columns = [str(col).strip() for col in self.excel_data.columns]
-
-                        # Validar columnas requeridas
-                        if not all(col in self.excel_data.columns for col in required_columns):
-                            raise ValueError("El archivo no contiene todas las columnas requeridas.")
-
+                        # Validar que las columnas requeridas estén presentes
+                        missing_columns = [col for col in required_columns if not any(
+                            req_col.upper() in str(col_name).upper() 
+                            for col_name in self.excel_data.columns
+                        )]
+                        
+                        if missing_columns:
+                            raise ValueError(f"Faltan las siguientes columnas: {', '.join(missing_columns)}")
+                        
                         # Limpiar datos de CLIENTE
                         self.excel_data['CLIENTE'] = self.excel_data['CLIENTE'].apply(
                             lambda x: str(x).strip() if pd.notna(x) else x
                         )
                         print("Valores únicos en CLIENTE:")
                         print(self.excel_data['CLIENTE'].unique())
-
+                        
                         # Detectar clientes
                         self.detect_clients()
                     else:
-                        print(f"Información de columnas: {raw_data}")
-                        raise ValueError("No se encontraron encabezados requeridos en las primeras filas.")
-                    
+                        raise ValueError("No se encontraron los encabezados requeridos en el archivo.")
+                        
                 except Exception as e:
                     messagebox.showerror("Error", f"Error al leer el archivo Excel: {str(e)}")
                     self.excel_path_var.set("")
                     self.excel_data = None
         except Exception as e:
             messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
+
 
     def select_excel_file(self):
         try:
@@ -252,96 +280,131 @@ class PDFProcessorApp:
                     required_columns = ['CLIENTE', 'SUBPARTIDA', 'DESCRIPCION DECLARADA - PREINSPECCION']
                     
                     # Cargar las primeras filas de la hoja específica
-                    raw_data = load_excel_data_from_sheet(filename, sheet_name, max_rows=20)
+                    raw_data = load_excel_data_from_sheet(filename, sheet_name, max_rows=50)
                     
                     print("Datos cargados para detección de encabezados:")
                     for idx, row in enumerate(raw_data):
                         print(f"Fila {idx + 1}: {row}")
                     
                     # Buscar encabezados
-                    header_row = find_header_row(raw_data, required_columns)
+                    header_row_idx, header_row = find_header_row(raw_data, required_columns)
                     
-                    if header_row is not None:
-                        # Lógica para cargar el DataFrame completo desde la hoja específica
-                        file_extension = os.path.splitext(filename)[1].lower()
-                        if file_extension == '.xlsx':
-                            wb = load_workbook(filename, data_only=True)
-                            ws = wb[sheet_name]
-                            data = list(ws.values)
-                            self.excel_data = pd.DataFrame(data[header_row + 1:], columns=data[header_row])
-                        elif file_extension == '.xls':
-                            book = xlrd.open_workbook(filename)
-                            sheet = book.sheet_by_name(sheet_name)
-                            data = [sheet.row_values(rowx) for rowx in range(sheet.nrows)]
-                            self.excel_data = pd.DataFrame(data[header_row + 1:], columns=data[header_row])
+                    if header_row_idx is not None and header_row is not None:
+                        # Crear un DataFrame con todas las filas después de los encabezados
+                        data_rows = raw_data[header_row_idx + 1:]
+                        
+                        # Convertir header_row a lista si es una tupla
+                        header_list = list(header_row) if isinstance(header_row, tuple) else list(header_row)
+                        
+                        # Crear el DataFrame asegurándose de que las columnas sean una lista
+                        self.excel_data = pd.DataFrame(data_rows, columns=header_list)
 
                         # Limpiar los nombres de columnas
-                        self.excel_data.columns = [str(col).strip() for col in self.excel_data.columns]
+                        self.excel_data.columns = [str(col).strip() if col is not None else f"Column_{i}" 
+                                                for i, col in enumerate(self.excel_data.columns)]
+                        
+                        # Validar que las columnas requeridas estén presentes
+                        missing_columns = [col for col in required_columns if not any(
+                            col.upper() in str(col_name).upper()  # Aquí se usa 'col' en lugar de 'req_col'
+                            for col_name in self.excel_data.columns
+                        )]
 
-                        # Validar columnas requeridas
-                        if not all(col in self.excel_data.columns for col in required_columns):
-                            raise ValueError("El archivo no contiene todas las columnas requeridas.")
-
+                        
+                        if missing_columns:
+                            raise ValueError(f"Faltan las siguientes columnas: {', '.join(missing_columns)}")
+                        
                         # Limpiar datos de CLIENTE
                         self.excel_data['CLIENTE'] = self.excel_data['CLIENTE'].apply(
                             lambda x: str(x).strip() if pd.notna(x) else x
                         )
                         print("Valores únicos en CLIENTE:")
                         print(self.excel_data['CLIENTE'].unique())
-
+                        
                         # Detectar clientes
                         self.detect_clients()
                     else:
-                        print(f"Información de columnas: {raw_data}")
-                        raise ValueError("No se encontraron encabezados requeridos en las primeras filas.")
-                    
+                        raise ValueError("No se encontraron los encabezados requeridos en el archivo.")
+                        
                 except Exception as e:
                     messagebox.showerror("Error", f"Error al leer el archivo Excel: {str(e)}")
                     self.excel_path_var.set("")
                     self.excel_data = None
         except Exception as e:
-            messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
-    def map_columns(self, required_columns):
+            messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}") 
+    def map_columns(self, data, header_row, required_columns):
         """
-        Mapea las columnas encontradas en el Excel con las requeridas.
+        Mapea las columnas encontradas con las columnas requeridas.
         """
+        if header_row is None:
+            return None
+            
+        headers = [str(col).upper().strip() for col in data[header_row]]
         column_mapping = {}
-        for existing_col in self.excel_data.columns:
-            existing_col_upper = str(existing_col).upper().strip()
-            for req_col in required_columns:
-                if req_col in existing_col_upper:
-                    column_mapping[existing_col] = req_col
+        
+        print("\nMapeando columnas:")
+        print(f"Headers encontrados: {headers}")
+        
+        for req_col in required_columns:
+            req_col_upper = req_col.upper()
+            found = False
+            
+            for idx, header in enumerate(headers):
+                if req_col_upper in header:
+                    column_mapping[req_col] = idx
+                    print(f"Columna '{req_col}' mapeada al índice {idx}")
+                    found = True
+                    break
+                    
+            if not found:
+                print(f"No se encontró mapeo para la columna '{req_col}'")
+        
         return column_mapping if len(column_mapping) == len(required_columns) else None
     
     def detect_clients(self):
-        if 'CLIENTE' in self.excel_data.columns:
-            clientes = self.excel_data['CLIENTE'].dropna().unique()
+        """
+        Detecta los clientes y sus subpartidas desde el Excel.
+        """
+        if self.excel_data is not None and not self.excel_data.empty:
+            # Asegurarse de que las columnas existan
+            required_cols = ['CLIENTE', 'SUBPARTIDA', 'DESCRIPCION DECLARADA - PREINSPECCION']
+            if not all(col in self.excel_data.columns for col in required_cols):
+                print("Columnas requeridas no encontradas:", required_cols)
+                return
 
-            for cliente in clientes:
-                cliente_data = self.excel_data[self.excel_data['CLIENTE'] == cliente]
-                subpartidas = []
-
-                for _, row in cliente_data.iterrows():
-                    subpartida = re.sub(r'[^0-9]', '', str(row['SUBPARTIDA']))
-                    descripcion = row.get('DESCRIPCION DECLARADA - PREINSPECCION', '')
-                    if subpartida:
-                        subpartidas.append({
-                            'cliente': cliente,
-                            'numero': subpartida,
-                            'descripcion': descripcion
-                        })
-
-                if subpartidas:
-                    self.clientes_info[str(cliente).strip()] = subpartidas
-
+            # Limpiar y procesar los datos
+            self.excel_data['CLIENTE'] = self.excel_data['CLIENTE'].astype(str).apply(
+                lambda x: x.strip() if not pd.isna(x) and x != 'nan' else ''
+            )
+            
+            # Filtrar filas con cliente válido
+            valid_data = self.excel_data[self.excel_data['CLIENTE'].str.len() > 0]
+            
+            # Reiniciar el diccionario de clientes
+            self.clientes_info = {}
+            
+            # Procesar cada fila válida
+            for _, row in valid_data.iterrows():
+                cliente = row['CLIENTE']
+                subpartida = re.sub(r'[^0-9]', '', str(row['SUBPARTIDA']))
+                descripcion = str(row.get('DESCRIPCION DECLARADA - PREINSPECCION', ''))
+                
+                if cliente and subpartida:
+                    if cliente not in self.clientes_info:
+                        self.clientes_info[cliente] = []
+                    
+                    self.clientes_info[cliente].append({
+                        'cliente': cliente,
+                        'numero': subpartida,
+                        'descripcion': descripcion
+                    })
+            
+            # Imprimir información de depuración
             print("\nClientes detectados:")
             for cliente, info in self.clientes_info.items():
-                print(f"Cliente: {cliente}")
+                print(f"\nCliente: {cliente}")
                 for subpartida_info in info:
                     print(f"  Subpartida: {subpartida_info['numero']}")
                     print(f"  Descripción: {subpartida_info['descripcion']}")
-        else:
-            print("No se encontró la columna 'CLIENTE' en los datos.")
 
     def process_excel_data(self):
         try:
@@ -928,6 +991,7 @@ class PreviewWindow:
                 print(f"Subpartidas para {cliente}: {subpartidas}")  # Debug
                 
                 if subpartidas:
+                    print(f"Creando PDF para cliente {cliente}")  # Debug
                     self.create_client_pdf(cliente, subpartidas)
                     
             messagebox.showinfo("Éxito", "Proceso completado correctamente")
