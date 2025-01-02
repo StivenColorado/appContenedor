@@ -154,26 +154,39 @@ class PDFProcessorApp:
             if filename:
                 self.excel_path_var.set(filename)
                 try:
-                    # Leer las primeras 20 filas de la hoja "PROFORMA" sin especificar header
-                    df_headers = pd.read_excel(filename, sheet_name='PROFORMA', header=None, nrows=20)
+                    # Load Excel with data_only=True
+                    df_headers = pd.read_excel(
+                        filename, 
+                        sheet_name='PROFORMA',
+                        header=None,
+                        nrows=20
+                    )
                     
-                    # Encontrar la fila que contiene los encabezados
                     header_row = self.find_header_row(df_headers)
                     
                     if header_row is not None:
-                        # Leer el Excel usando la fila de encabezados encontrada
-                        self.excel_data = pd.read_excel(filename, sheet_name='PROFORMA', header=header_row)
+                        self.excel_data = pd.read_excel(
+                            filename,
+                            sheet_name='PROFORMA',
+                            header=header_row
+                        )
                         
-                        # Verificar las columnas requeridas de manera más flexible
+                        # Clean client names
+                        if 'CLIENTE' in self.excel_data.columns:
+                            self.excel_data['CLIENTE'] = self.excel_data['CLIENTE'].apply(
+                                lambda x: str(x).replace('=', '').replace('$INVENTARIO.', '')
+                                if isinstance(x, str) else x
+                            )
+                        
                         required_columns = ['CLIENTE', 'SUBPARTIDA', 'DESCRIPCION DECLARADA - PREINSPECCION']
                         found_columns = []
                         column_mapping = {}
                         
                         for existing_col in self.excel_data.columns:
                             existing_col_upper = str(existing_col).upper().strip()
-                            cleaned_col = re.sub(r'[^A-Z]', '', existing_col_upper)  # Eliminar caracteres no alfabéticos
+                            cleaned_col = re.sub(r'[^A-Z]', '', existing_col_upper)
                             for req_col in required_columns:
-                                cleaned_req_col = re.sub(r'[^A-Z]', '', req_col)  # Eliminar caracteres no alfabéticos
+                                cleaned_req_col = re.sub(r'[^A-Z]', '', req_col)
                                 if cleaned_req_col in cleaned_col:
                                     column_mapping[existing_col] = req_col
                                     found_columns.append(req_col)
@@ -187,7 +200,6 @@ class PDFProcessorApp:
                             self.excel_path_var.set("")
                             self.excel_data = None
                         else:
-                            # Renombrar las columnas usando el mapeo
                             self.excel_data = self.excel_data.rename(columns=column_mapping)
                             self.detect_clients()
                             
@@ -202,30 +214,38 @@ class PDFProcessorApp:
                     self.excel_data = None
         except Exception as e:
             messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
-
     def detect_clients(self):
         """
         Detecta los clientes en el archivo Excel y recopila los valores de SUBPARTIDA y DESCRIPCION DECLARADA - PREINSPECCION para cada cliente.
         """
         self.clientes_info = {}
-        for cliente in self.excel_data['CLIENTE'].dropna().unique():
-            cliente_data = self.excel_data[self.excel_data['CLIENTE'] == cliente]
-            subpartidas = []
-            for _, row in cliente_data.iterrows():
-                subpartida = re.sub(r'[^0-9]', '', str(row['SUBPARTIDA']))
-                descripcion = row.get('DESCRIPCION DECLARADA - PREINSPECCION', '')
-                if subpartida:
-                    subpartidas.append({
-                        'numero': subpartida,
-                        'descripcion': descripcion
-                    })
-            self.clientes_info[cliente] = subpartidas
         
-        # Mostrar la información en consola
-        for cliente, info in self.clientes_info.items():
-            print(f"Cliente: {cliente}")
-            for subpartida_info in info:
-                print(f"  Subpartida: {subpartida_info['numero']}, Descripción: {subpartida_info['descripcion']}")
+        # Ensure we're working with clean data
+        if 'CLIENTE' in self.excel_data.columns:
+            # Group by client to handle multiple entries per client
+            for cliente in self.excel_data['CLIENTE'].unique():
+                if pd.notna(cliente):  # Skip NaN values
+                    cliente_data = self.excel_data[self.excel_data['CLIENTE'] == cliente]
+                    subpartidas = []
+                    
+                    for _, row in cliente_data.iterrows():
+                        subpartida = re.sub(r'[^0-9]', '', str(row['SUBPARTIDA']))
+                        descripcion = row.get('DESCRIPCION DECLARADA - PREINSPECCION', '')
+                        if subpartida:
+                            subpartidas.append({
+                                'numero': subpartida,
+                                'descripcion': descripcion
+                            })
+                    
+                    if subpartidas:  # Only add clients with valid subpartidas
+                        self.clientes_info[str(cliente).strip()] = subpartidas
+            
+            # Debug information
+            for cliente, info in self.clientes_info.items():
+                print(f"\nCliente: {cliente}")
+                for subpartida_info in info:
+                    print(f"  Subpartida: {subpartida_info['numero']}")
+                    print(f"  Descripción: {subpartida_info['descripcion']}")
 
     def process_excel_data(self):
         if self.excel_data is None:
