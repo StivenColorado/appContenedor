@@ -203,7 +203,6 @@ class PDFProcessorApp:
         except Exception as e:
             messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
 
-
     def detect_clients(self):
         """
         Detecta los clientes en el archivo Excel y recopila los valores de SUBPARTIDA y DESCRIPCION DECLARADA - PREINSPECCION para cada cliente.
@@ -286,7 +285,7 @@ class PDFProcessorApp:
         
         if len(merger.pages) > 0:
             # Crear nombre de archivo válido para Windows
-            cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', cliente)
+            cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', str(cliente))
             output_path = os.path.join(clients_dir, f"{cliente_filename}.pdf")
             merger.write(output_path)
             print(f"Archivo PDF creado para {cliente}: {output_path}")  # Debug
@@ -808,6 +807,24 @@ class PreviewWindow:
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar los PDFs: {str(e)}")
 
+    def process_excel_data(self):
+        if self.excel_data is None:
+            messagebox.showerror("Error", "No se ha cargado un archivo Excel válido")
+            return
+
+        try:
+            # Procesar por cliente
+            for cliente, subpartidas in self.clientes_info.items():
+                print(f"Procesando cliente: {cliente}")  # Debug
+                print(f"Subpartidas para {cliente}: {subpartidas}")  # Debug
+                
+                if subpartidas:
+                    self.create_client_pdf(cliente, subpartidas)
+                    
+            messagebox.showinfo("Éxito", "Proceso completado correctamente")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al procesar el archivo Excel: {str(e)}")
+    
     def save_single_pdf(self, input_pdf, subpartida, pages, subpartida_counts):
         # Incrementar contador para esta subpartida
         subpartida_counts[subpartida] = subpartida_counts.get(subpartida, 0) + 1
