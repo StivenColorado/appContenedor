@@ -928,6 +928,7 @@ class PreviewWindow:
         except Exception as e:
             print(f"Error en OCR: {str(e)}")
             messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")     
+    
     def save_pdfs(self):
         """
         Guarda los PDFs separados por subpartida y luego crea los PDFs por cliente.
@@ -969,33 +970,25 @@ class PreviewWindow:
                 for subpartida_info in subpartidas:
                     subpartida = subpartida_info['numero']
                     # Normalizar el número de subpartida para la búsqueda
-                    subpartida_base = re.sub(r'[^0-9]', '', subpartida)
-                    
-                    # Crear una lista de posibles variantes de la subpartida
-                    subpartida_variants = [
-                        subpartida_base,
-                        f"{subpartida_base}0",
-                        f"{subpartida_base}00",
-                        f"{subpartida_base}000"
-                    ]
+                    subpartida_base = re.sub(r'[^0-9]', '', subpartida).rstrip('0')
+                    print(f"ARCHIVO BASE ORIGINIAL PARA BUSCAR: {subpartida_base}")
                     
                     print(f"Buscando archivos para subpartida {subpartida}")
-                    print(f"Variantes a buscar: {subpartida_variants}")
                     
-                    # Buscar todas las variantes
-                    for variant in subpartida_variants:
-                        subpartida_pattern = f"subpartida_{variant}*.pdf"
-                        matching_files = glob.glob(os.path.join(separated_dir, subpartida_pattern))
-                        
-                        print(f"Buscando con patrón: {subpartida_pattern}")
-                        print(f"Archivos encontrados: {matching_files}")
-                        
-                        if matching_files:
-                            for pdf_file in matching_files:
-                                print(f"Añadiendo archivo: {pdf_file}")
-                                merger.append(pdf_file)
-                                pdfs_added = True
-                            break  # Si encontramos archivos con una variante, no seguimos buscando
+                    # Buscar la subpartida exacta
+                    subpartida_pattern = f"subpartida_{subpartida_base}.pdf"
+                    search_path = os.path.join(separated_dir, subpartida_pattern)
+                    matching_files = glob.glob(search_path)
+                    
+                    print(f"Buscando con patrón: {subpartida_pattern}")
+                    print(f"URL de búsqueda: {search_path}")
+                    print(f"Archivos encontrados: {matching_files}")
+                    
+                    if matching_files:
+                        for pdf_file in matching_files:
+                            print(f"Añadiendo archivo: {pdf_file}")
+                            merger.append(pdf_file)
+                            pdfs_added = True
 
                 if pdfs_added:
                     cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', str(cliente))
@@ -1014,6 +1007,9 @@ class PreviewWindow:
         except Exception as e:
             print(f"Error al guardar los PDFs: {str(e)}")
             messagebox.showerror("Error", f"Error al guardar los PDFs: {str(e)}")
+
+
+
     def process_excel_data(self):
         if self.excel_data is None:
             messagebox.showerror("Error", "No se ha cargado un archivo Excel válido")
@@ -1035,38 +1031,27 @@ class PreviewWindow:
     
     def save_single_pdf(self, input_pdf, subpartida, pages, subpartida_counts):
         """
-        Guarda un único PDF para una subpartida específica.
+        Guarda un único PDF separado por subpartida.
         """
         try:
-            # Incrementar contador para esta subpartida
-            subpartida_counts[subpartida] = subpartida_counts.get(subpartida, 0) + 1
-            copy_number = subpartida_counts[subpartida]
+            subpartida_base = re.sub(r'[^0-9]', '', subpartida).rstrip('0')
+            if subpartida_base not in subpartida_counts:
+                subpartida_counts[subpartida_base] = 0
+            else:
+                subpartida_counts[subpartida_base] += 1
             
-            # Crear nuevo PDF
-            output = PyPDF2.PdfWriter()
+            output_filename = f"subpartida_{subpartida_base}.pdf"
+            output_path = os.path.join(self.parent_window.output_path.get(), "declaraciones_separadas", output_filename)
             
-            # Añadir todas las páginas del grupo
-            for page_num in pages:
-                if page_num < len(input_pdf.pages):
-                    output.add_page(input_pdf.pages[page_num])
-            
-            # Generar nombre de archivo
-            filename = f"subpartida_{subpartida}"
-            if copy_number > 1:
-                filename += f"_copia_{copy_number}"
-            filename += ".pdf"
-            
-            output_path = os.path.join(self.parent_window.output_path.get(), "declaraciones_separadas", filename)
-            
-            # Guardar PDF
             with open(output_path, "wb") as output_file:
-                output.write(output_file)
-                
-            print(f"Guardado archivo separado: {output_path}")
+                writer = PyPDF2.PdfWriter()
+                for page_num in pages:
+                    writer.add_page(input_pdf.pages[page_num])
+                writer.write(output_file)
             
+            print(f"Guardado archivo separado: {output_path}")
         except Exception as e:
-            print(f"Error al guardar PDF individual: {str(e)}")
-            raise
+            print(f"Error al guardar el PDF separado: {str(e)}")
 
 if __name__ == "__main__":
     try:
