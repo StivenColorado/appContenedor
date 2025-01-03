@@ -13,33 +13,27 @@ import numpy as np
 import pandas as pd
 from PyPDF2 import PdfMerger
 from openpyxl import load_workbook
-import xlrd
+import openpyxl
+import glob
 # Set TESSDATA_PREFIX environment variable
 os.environ['TESSDATA_PREFIX'] = '/usr/local/share/tessdata/'
 
 def load_excel_data_from_sheet(filename, sheet_name, max_rows=50):
     """
     Carga los datos de una hoja específica del archivo Excel, incluyendo valores calculados.
-    Ahora busca en más filas para encontrar los encabezados.
+    Solo permite archivos .xlsx
     """
-    file_extension = os.path.splitext(filename)[1].lower()
+    extension = os.path.splitext(filename)[1].lower()
     data = []
 
+    if extension != '.xlsx':
+        raise ValueError("Solo se permiten archivos con extensión .xlsx")
+        
     try:
-        if file_extension == '.xlsx':
-            print(f"Cargando archivo XLSX: {filename}, hoja: {sheet_name}")
-            wb = load_workbook(filename, data_only=True)
-            sheet = wb[sheet_name]
-            for row in sheet.iter_rows(min_row=1, max_row=max_rows, values_only=True):
-                data.append(row)
-        elif file_extension == '.xls':
-            print(f"Cargando archivo XLS: {filename}, hoja: {sheet_name}")
-            wb = xlrd.open_workbook(filename)
-            sheet = wb.sheet_by_name(sheet_name)
-            for row_idx in range(min(max_rows, sheet.nrows)):
-                data.append(tuple(sheet.row_values(row_idx)))
-        else:
-            raise ValueError("Formato de archivo no soportado")
+        wb = openpyxl.load_workbook(filename, data_only=True)
+        sheet = wb[sheet_name]
+        for row in sheet.iter_rows(min_row=1, max_row=max_rows, values_only=True):
+            data.append(row)
     except Exception as e:
         print(f"Error al cargar los datos de la hoja: {str(e)}")
     
@@ -86,6 +80,22 @@ def find_header_row(data, required_columns):
     
     print("\nNo se encontraron todos los encabezados requeridos.")
     return None, None
+
+def obtener_valor_inventario(file_path, referencia):
+        """Obtiene el valor de la referencia en la hoja INVENTARIO."""
+        extension = os.path.splitext(file_path)[1].lower()
+        
+        if extension == ".xlsx":
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            inventario = wb["INVENTARIO"]
+            
+            columna = ''.join(filter(str.isalpha, referencia))
+            fila = ''.join(filter(str.isdigit, referencia))
+            
+            return inventario[f"{columna}{fila}"].value
+        else:
+            raise ValueError("Solo se permiten archivos con extensión .xlsx")
+
 class PDFProcessorApp:
     def __init__(self, root):
         self.root = root
@@ -197,11 +207,9 @@ class PDFProcessorApp:
         except Exception as e:
             messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
 
-    # Modificación para imprimir información antes de generar el error
-    
     def select_excel_file(self):
         try:
-            file_types = [('Excel files', '*.xlsx'), ('Excel files', '*.xls')]
+            file_types = [('Excel files', '*.xlsx')]
             filename = filedialog.askopenfilename(
                 title="Seleccionar archivo Excel",
                 filetypes=file_types,
@@ -209,128 +217,73 @@ class PDFProcessorApp:
             )
             
             if filename:
+                extension = os.path.splitext(filename)[1].lower()
+                if extension != '.xlsx':
+                    messagebox.showerror("Error", "Solo se permiten archivos con extensión .xlsx")
+                    return
+                    
                 self.excel_path_var.set(filename)
                 try:
-                    # Configurar la hoja específica
-                    sheet_name = "PROFORMA"
-                    required_columns = ['CLIENTE', 'SUBPARTIDA', 'DESCRIPCION DECLARADA - PREINSPECCION']
+                    wb = openpyxl.load_workbook(filename, data_only=True)
+                    sheet = wb["PROFORMA"]
                     
-                    # Cargar las primeras filas de la hoja específica
-                    raw_data = load_excel_data_from_sheet(filename, sheet_name, max_rows=50)
+                    # Buscar la columna CLIENTE en las primeras 20 filas
+                    cliente_col = None
+                    cliente_row = None
+                    for row in range(1, 21):  # Buscar en las primeras 20 filas
+                        for col in range(1, sheet.max_column + 1):
+                            cell_value = str(sheet.cell(row=row, column=col).value or '').upper()
+                            if 'CLIENTE' in cell_value:
+                                cliente_col = col
+                                cliente_row = row
+                                break
+                        if cliente_col:
+                            break
                     
-                    print("Datos cargados para detección de encabezados:")
-                    for idx, row in enumerate(raw_data):
-                        print(f"Fila {idx + 1}: {row}")
+                    if not cliente_col:
+                        raise ValueError("No se encontró la columna CLIENTE en las primeras 20 filas")
                     
-                    # Buscar encabezados
-                    header_row_idx, header_row = find_header_row(raw_data, required_columns)
+                    # Buscar la columna SUBPARTIDA
+                    subpartida_col = None
+                    for col in range(1, sheet.max_column + 1):
+                        cell_value = str(sheet.cell(row=cliente_row, column=col).value or '').upper()
+                        if 'SUBPARTIDA' in cell_value:
+                            subpartida_col = col
+                            break
                     
-                    if header_row_idx is not None and header_row is not None:
-                        # Crear un DataFrame con todas las filas después de los encabezados
-                        data_rows = raw_data[header_row_idx + 1:]
-                        # self.excel_data = pd.DataFrame(data_rows, columns=header_row)
-                        self.excel_data = pd.DataFrame(data_rows, columns=list(header_row))
-
-                        # Limpiar los nombres de columnas
-                        self.excel_data.columns = [str(col).strip() for col in self.excel_data.columns]
+                    # Obtener valores únicos de clientes y sus subpartidas
+                    self.clientes_info = {}
+                    for row in range(cliente_row + 1, sheet.max_row + 1):
+                        cliente = sheet.cell(row=row, column=cliente_col).value
+                        subpartida = sheet.cell(row=row, column=subpartida_col).value if subpartida_col else None
                         
-                        # Validar que las columnas requeridas estén presentes
-                        missing_columns = [col for col in required_columns if not any(
-                            req_col.upper() in str(col_name).upper() 
-                            for col_name in self.excel_data.columns
-                        )]
-                        
-                        if missing_columns:
-                            raise ValueError(f"Faltan las siguientes columnas: {', '.join(missing_columns)}")
-                        
-                        # Limpiar datos de CLIENTE
-                        self.excel_data['CLIENTE'] = self.excel_data['CLIENTE'].apply(
-                            lambda x: str(x).strip() if pd.notna(x) else x
-                        )
-                        print("Valores únicos en CLIENTE:")
-                        print(self.excel_data['CLIENTE'].unique())
-                        
-                        # Detectar clientes
-                        self.detect_clients()
-                    else:
-                        raise ValueError("No se encontraron los encabezados requeridos en el archivo.")
-                        
+                        if cliente and isinstance(cliente, str):
+                            cliente = cliente.strip()
+                            if cliente not in self.clientes_info:
+                                self.clientes_info[cliente] = []
+                            
+                            if subpartida:
+                                # Limpiar la subpartida para obtener solo números
+                                subpartida_num = re.sub(r'[^0-9]', '', str(subpartida))
+                                if subpartida_num:
+                                    self.clientes_info[cliente].append({
+                                        'numero': subpartida_num,
+                                        'descripcion': ''  # Puedes agregar la descripción si es necesario
+                                    })
+                    
+                    print("\nClientes y subpartidas detectados:")
+                    for cliente, info in self.clientes_info.items():
+                        print(f"\nCliente: {cliente}")
+                        for subpartida_info in info:
+                            print(f"  Subpartida: {subpartida_info['numero']}")
+                    
                 except Exception as e:
                     messagebox.showerror("Error", f"Error al leer el archivo Excel: {str(e)}")
                     self.excel_path_var.set("")
                     self.excel_data = None
         except Exception as e:
             messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}")
-
-
-    def select_excel_file(self):
-        try:
-            file_types = [('Excel files', '*.xlsx'), ('Excel files', '*.xls')]
-            filename = filedialog.askopenfilename(
-                title="Seleccionar archivo Excel",
-                filetypes=file_types,
-                parent=self.root
-            )
             
-            if filename:
-                self.excel_path_var.set(filename)
-                try:
-                    # Configurar la hoja específica
-                    sheet_name = "PROFORMA"
-                    required_columns = ['CLIENTE', 'SUBPARTIDA', 'DESCRIPCION DECLARADA - PREINSPECCION']
-                    
-                    # Cargar las primeras filas de la hoja específica
-                    raw_data = load_excel_data_from_sheet(filename, sheet_name, max_rows=50)
-                    
-                    print("Datos cargados para detección de encabezados:")
-                    for idx, row in enumerate(raw_data):
-                        print(f"Fila {idx + 1}: {row}")
-                    
-                    # Buscar encabezados
-                    header_row_idx, header_row = find_header_row(raw_data, required_columns)
-                    
-                    if header_row_idx is not None and header_row is not None:
-                        # Crear un DataFrame con todas las filas después de los encabezados
-                        data_rows = raw_data[header_row_idx + 1:]
-                        
-                        # Convertir header_row a lista si es una tupla
-                        header_list = list(header_row) if isinstance(header_row, tuple) else list(header_row)
-                        
-                        # Crear el DataFrame asegurándose de que las columnas sean una lista
-                        self.excel_data = pd.DataFrame(data_rows, columns=header_list)
-
-                        # Limpiar los nombres de columnas
-                        self.excel_data.columns = [str(col).strip() if col is not None else f"Column_{i}" 
-                                                for i, col in enumerate(self.excel_data.columns)]
-                        
-                        # Validar que las columnas requeridas estén presentes
-                        missing_columns = [col for col in required_columns if not any(
-                            col.upper() in str(col_name).upper()  # Aquí se usa 'col' en lugar de 'req_col'
-                            for col_name in self.excel_data.columns
-                        )]
-
-                        
-                        if missing_columns:
-                            raise ValueError(f"Faltan las siguientes columnas: {', '.join(missing_columns)}")
-                        
-                        # Limpiar datos de CLIENTE
-                        self.excel_data['CLIENTE'] = self.excel_data['CLIENTE'].apply(
-                            lambda x: str(x).strip() if pd.notna(x) else x
-                        )
-                        print("Valores únicos en CLIENTE:")
-                        print(self.excel_data['CLIENTE'].unique())
-                        
-                        # Detectar clientes
-                        self.detect_clients()
-                    else:
-                        raise ValueError("No se encontraron los encabezados requeridos en el archivo.")
-                        
-                except Exception as e:
-                    messagebox.showerror("Error", f"Error al leer el archivo Excel: {str(e)}")
-                    self.excel_path_var.set("")
-                    self.excel_data = None
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al seleccionar el archivo: {str(e)}") 
     def map_columns(self, data, header_row, required_columns):
         """
         Mapea las columnas encontradas con las columnas requeridas.
@@ -413,6 +366,7 @@ class PDFProcessorApp:
                     print(f"Procesando cliente: {cliente}")
                     for subpartida in subpartidas:
                         print(subpartida)
+                    self.create_client_pdf(cliente, subpartidas)
             else:
                 print("No hay información de clientes.")
         except Exception as e:
@@ -439,30 +393,58 @@ class PDFProcessorApp:
             messagebox.showerror("Error", f"Error al seleccionar la carpeta: {str(e)}")
     
     def create_client_pdf(self, cliente, subpartidas):
-        merger = PdfMerger()
-        separated_dir = os.path.join(self.output_path.get(), "declaraciones_separadas")
-        clients_dir = os.path.join(self.output_path.get(), "separados_por_cliente")
+        """
+        Crea un PDF para cada cliente combinando sus subpartidas correspondientes.
         
-        for subpartida_info in subpartidas:
-            subpartida = subpartida_info['numero']
-            base_pdf = os.path.join(separated_dir, f"subpartida_{subpartida}.pdf")
-            copy_pdf = os.path.join(separated_dir, f"subpartida_{subpartida}_copia_1.pdf")
+        Args:
+            cliente (str): Nombre del cliente
+            subpartidas (list): Lista de diccionarios con información de subpartidas del cliente
+        """
+        try:
+            merger = PdfMerger()
+            pdfs_added = False
+            separated_dir = os.path.join(self.output_path.get(), "declaraciones_separadas")
+            clients_dir = os.path.join(self.output_path.get(), "separados_por_cliente")
             
-            print(f"Buscando archivos PDF para subpartida {subpartida}")  # Debug
+            print(f"\nProcesando cliente: {cliente}")
+            print(f"Buscando archivos en: {separated_dir}")
             
-            if os.path.exists(base_pdf):
-                merger.append(base_pdf)
-            if os.path.exists(copy_pdf):
-                merger.append(copy_pdf)
-        
-        if len(merger.pages) > 0:
-            # Crear nombre de archivo válido para Windows
-            cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', str(cliente))
-            output_path = os.path.join(clients_dir, f"{cliente_filename}.pdf")
-            merger.write(output_path)
-            print(f"Archivo PDF creado para {cliente}: {output_path}")  # Debug
-        
-        merger.close()
+            for subpartida_info in subpartidas:
+                subpartida = subpartida_info['numero']
+                print(f"Buscando archivos para subpartida: {subpartida}")
+                
+                # Buscar todos los archivos relacionados con esta subpartida
+                subpartida_pattern = f"subpartida_{subpartida}*.pdf"
+                matching_files = glob.glob(os.path.join(separated_dir, subpartida_pattern))
+                
+                if matching_files:
+                    print(f"Archivos encontrados para subpartida {subpartida}:")
+                    for pdf_file in matching_files:
+                        print(f"- {pdf_file}")
+                        merger.append(pdf_file)
+                        pdfs_added = True
+                else:
+                    print(f"No se encontraron archivos para subpartida {subpartida}")
+            
+            if pdfs_added:
+                # Crear nombre de archivo válido para Windows
+                cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', str(cliente))
+                output_path = os.path.join(clients_dir, f"{cliente_filename}.pdf")
+                
+                # Asegurarse de que el directorio existe
+                os.makedirs(clients_dir, exist_ok=True)
+                
+                # Guardar el PDF combinado
+                merger.write(output_path)
+                print(f"PDF creado para cliente {cliente}: {output_path}")
+            else:
+                print(f"No se encontraron PDFs para combinar para el cliente {cliente}")
+            
+            merger.close()
+            
+        except Exception as e:
+            print(f"Error al crear PDF para cliente {cliente}: {str(e)}")
+            messagebox.showerror("Error", f"Error al crear PDF para cliente {cliente}: {str(e)}")
 
     def show_pdf_selection_window(self, pdf1_path, pdf2_path, descripcion):
         selection_window = tk.Toplevel(self.root)
@@ -947,38 +929,91 @@ class PreviewWindow:
             print(f"Error en OCR: {str(e)}")
             messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")     
     def save_pdfs(self):
+        """
+        Guarda los PDFs separados por subpartida y luego crea los PDFs por cliente.
+        """
         try:
+            # Crear directorios necesarios
+            separated_dir = os.path.join(self.parent_window.output_path.get(), "declaraciones_separadas")
+            clients_dir = os.path.join(self.parent_window.output_path.get(), "separados_por_cliente")
+            os.makedirs(separated_dir, exist_ok=True)
+            os.makedirs(clients_dir, exist_ok=True)
+
+            # 1. Primero, guardar todas las subpartidas separadas
             input_pdf = PyPDF2.PdfReader(self.input_path)
             current_subpartida = None
             current_pages = []
-            subpartida_counts = {}  # Para contar copias
-            
-            # Procesar todas las páginas
+            subpartida_counts = {}
+
+            # Procesar todas las páginas para crear los PDFs separados
             for page_info in self.page_data:
                 if page_info['type'] == 'p':
-                    # Si tenemos páginas acumuladas, guardar el PDF anterior
                     if current_subpartida and current_pages:
                         self.save_single_pdf(input_pdf, current_subpartida, current_pages, subpartida_counts)
-                    
-                    # Iniciar nuevo grupo
                     current_subpartida = page_info['subpartida']
                     current_pages = [page_info['page_number']]
                 else:  # Espaldar
-                    if current_pages:  # Añadir a grupo actual
+                    if current_pages:
                         current_pages.append(page_info['page_number'])
-            
+
             # Guardar el último grupo
             if current_subpartida and current_pages:
                 self.save_single_pdf(input_pdf, current_subpartida, current_pages, subpartida_counts)
-            
+
+            # 2. Después de que todos los PDFs separados están guardados, crear los PDFs por cliente
+            for cliente, subpartidas in self.parent_window.clientes_info.items():
+                merger = PdfMerger()
+                pdfs_added = False
+                
+                print(f"\nProcesando cliente: {cliente}")
+                for subpartida_info in subpartidas:
+                    subpartida = subpartida_info['numero']
+                    # Normalizar el número de subpartida para la búsqueda
+                    subpartida_base = re.sub(r'[^0-9]', '', subpartida)
+                    
+                    # Crear una lista de posibles variantes de la subpartida
+                    subpartida_variants = [
+                        subpartida_base,
+                        f"{subpartida_base}0",
+                        f"{subpartida_base}00",
+                        f"{subpartida_base}000"
+                    ]
+                    
+                    print(f"Buscando archivos para subpartida {subpartida}")
+                    print(f"Variantes a buscar: {subpartida_variants}")
+                    
+                    # Buscar todas las variantes
+                    for variant in subpartida_variants:
+                        subpartida_pattern = f"subpartida_{variant}*.pdf"
+                        matching_files = glob.glob(os.path.join(separated_dir, subpartida_pattern))
+                        
+                        print(f"Buscando con patrón: {subpartida_pattern}")
+                        print(f"Archivos encontrados: {matching_files}")
+                        
+                        if matching_files:
+                            for pdf_file in matching_files:
+                                print(f"Añadiendo archivo: {pdf_file}")
+                                merger.append(pdf_file)
+                                pdfs_added = True
+                            break  # Si encontramos archivos con una variante, no seguimos buscando
+
+                if pdfs_added:
+                    cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', str(cliente))
+                    output_path = os.path.join(clients_dir, f"{cliente_filename}.pdf")
+                    merger.write(output_path)
+                    print(f"PDF creado para cliente {cliente}: {output_path}")
+                else:
+                    print(f"No se encontraron PDFs para combinar para el cliente {cliente}")
+                
+                merger.close()
+
             messagebox.showinfo("Éxito", "PDFs generados correctamente")
             self.root.destroy()
-            self.parent_window.process_excel_data()  # Procesar los datos del Excel después de guardar los PDFs separados
-            self.parent_window.root.deiconify()  # Mostrar la ventana principal
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al guardar los PDFs: {str(e)}")
+            self.parent_window.root.deiconify()
 
+        except Exception as e:
+            print(f"Error al guardar los PDFs: {str(e)}")
+            messagebox.showerror("Error", f"Error al guardar los PDFs: {str(e)}")
     def process_excel_data(self):
         if self.excel_data is None:
             messagebox.showerror("Error", "No se ha cargado un archivo Excel válido")
@@ -999,29 +1034,39 @@ class PreviewWindow:
             messagebox.showerror("Error", f"Error al procesar el archivo Excel: {str(e)}")
     
     def save_single_pdf(self, input_pdf, subpartida, pages, subpartida_counts):
-        # Incrementar contador para esta subpartida
-        subpartida_counts[subpartida] = subpartida_counts.get(subpartida, 0) + 1
-        copy_number = subpartida_counts[subpartida]
-        
-        # Crear nuevo PDF
-        output = PyPDF2.PdfWriter()
-        
-        # Añadir todas las páginas del grupo
-        for page_num in pages:
-            if page_num < len(input_pdf.pages):
-                output.add_page(input_pdf.pages[page_num])
-        
-        # Generar nombre de archivo
-        filename = f"subpartida_{subpartida}"
-        if copy_number > 1:
-            filename += f"_copia_{copy_number}"
-        filename += ".pdf"
-        
-        output_path = os.path.join(self.parent_window.output_path.get(), "declaraciones_separadas", filename)
-        
-        # Guardar PDF
-        with open(output_path, "wb") as output_file:
-            output.write(output_file)
+        """
+        Guarda un único PDF para una subpartida específica.
+        """
+        try:
+            # Incrementar contador para esta subpartida
+            subpartida_counts[subpartida] = subpartida_counts.get(subpartida, 0) + 1
+            copy_number = subpartida_counts[subpartida]
+            
+            # Crear nuevo PDF
+            output = PyPDF2.PdfWriter()
+            
+            # Añadir todas las páginas del grupo
+            for page_num in pages:
+                if page_num < len(input_pdf.pages):
+                    output.add_page(input_pdf.pages[page_num])
+            
+            # Generar nombre de archivo
+            filename = f"subpartida_{subpartida}"
+            if copy_number > 1:
+                filename += f"_copia_{copy_number}"
+            filename += ".pdf"
+            
+            output_path = os.path.join(self.parent_window.output_path.get(), "declaraciones_separadas", filename)
+            
+            # Guardar PDF
+            with open(output_path, "wb") as output_file:
+                output.write(output_file)
+                
+            print(f"Guardado archivo separado: {output_path}")
+            
+        except Exception as e:
+            print(f"Error al guardar PDF individual: {str(e)}")
+            raise
 
 if __name__ == "__main__":
     try:
