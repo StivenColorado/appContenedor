@@ -929,6 +929,34 @@ class PreviewWindow:
             print(f"Error en OCR: {str(e)}")
             messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")     
     
+    def show_preview(self, cliente, subpartida, matching_files):
+        """
+        Muestra una vista previa de los archivos duplicados para que el usuario pueda seleccionar cuál desea incluir.
+        """
+        preview_window = tk.Toplevel(self.root)
+        preview_window.title(f"Seleccionar archivo para {cliente} - Subpartida {subpartida}")
+        
+        label = ttk.Label(preview_window, text=f"Seleccionar archivo para {cliente} - Subpartida {subpartida}")
+        label.pack(pady=10)
+        
+        file_var = tk.StringVar(value=matching_files[0])
+        
+        for file in matching_files:
+            radio_button = ttk.Radiobutton(preview_window, text=file, variable=file_var, value=file)
+            radio_button.pack(anchor=tk.W)
+        
+        def on_select():
+            selected_file = file_var.get()
+            self.selected_files[cliente][subpartida] = selected_file
+            preview_window.destroy()
+        
+        select_button = ttk.Button(preview_window, text="Seleccionar", command=on_select)
+        select_button.pack(pady=10)
+        
+        preview_window.transient(self.root)
+        preview_window.grab_set()
+        self.root.wait_window(preview_window)
+
     def save_pdfs(self):
         """
         Guarda los PDFs separados por subpartida y luego crea los PDFs por cliente.
@@ -961,6 +989,9 @@ class PreviewWindow:
             if current_subpartida and current_pages:
                 self.save_single_pdf(input_pdf, current_subpartida, current_pages, subpartida_counts)
 
+            # Inicializar diccionario para archivos seleccionados
+            self.selected_files = {cliente: {} for cliente in self.parent_window.clientes_info.keys()}
+
             # 2. Después de que todos los PDFs separados están guardados, crear los PDFs por cliente
             for cliente, subpartidas in self.parent_window.clientes_info.items():
                 merger = PdfMerger()
@@ -970,13 +1001,15 @@ class PreviewWindow:
                 for subpartida_info in subpartidas:
                     subpartida = subpartida_info['numero']
                     # Normalizar el número de subpartida para la búsqueda
-                    subpartida_base = re.sub(r'[^0-9]', '', subpartida).rstrip('0')
+                    subpartida_base = re.sub(r'[^0-9]', '', subpartida)
+                    if subpartida_base.endswith('0'):
+                        subpartida_base = subpartida_base[:-1]
                     print(f"ARCHIVO BASE ORIGINIAL PARA BUSCAR: {subpartida_base}")
                     
                     print(f"Buscando archivos para subpartida {subpartida}")
                     
-                    # Buscar la subpartida exacta
-                    subpartida_pattern = f"subpartida_{subpartida_base}.pdf"
+                    # Buscar la subpartida exacta y sus copias
+                    subpartida_pattern = f"subpartida_{subpartida_base}*.pdf"
                     search_path = os.path.join(separated_dir, subpartida_pattern)
                     matching_files = glob.glob(search_path)
                     
@@ -985,10 +1018,15 @@ class PreviewWindow:
                     print(f"Archivos encontrados: {matching_files}")
                     
                     if matching_files:
-                        for pdf_file in matching_files:
-                            print(f"Añadiendo archivo: {pdf_file}")
-                            merger.append(pdf_file)
-                            pdfs_added = True
+                        if len(matching_files) > 1:
+                            self.show_preview(cliente, subpartida, matching_files)
+                            selected_file = self.selected_files[cliente][subpartida]
+                            print(f"Añadiendo archivo seleccionado: {selected_file}")
+                            merger.append(selected_file)
+                        else:
+                            print(f"Añadiendo archivo: {matching_files[0]}")
+                            merger.append(matching_files[0])
+                        pdfs_added = True
 
                 if pdfs_added:
                     cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', str(cliente))
@@ -1007,9 +1045,6 @@ class PreviewWindow:
         except Exception as e:
             print(f"Error al guardar los PDFs: {str(e)}")
             messagebox.showerror("Error", f"Error al guardar los PDFs: {str(e)}")
-
-
-
     def process_excel_data(self):
         if self.excel_data is None:
             messagebox.showerror("Error", "No se ha cargado un archivo Excel válido")
@@ -1034,13 +1069,17 @@ class PreviewWindow:
         Guarda un único PDF separado por subpartida.
         """
         try:
-            subpartida_base = re.sub(r'[^0-9]', '', subpartida).rstrip('0')
+            subpartida_base = re.sub(r'[^0-9]', '', subpartida)
             if subpartida_base not in subpartida_counts:
                 subpartida_counts[subpartida_base] = 0
             else:
                 subpartida_counts[subpartida_base] += 1
             
-            output_filename = f"subpartida_{subpartida_base}.pdf"
+            if subpartida_counts[subpartida_base] > 0:
+                output_filename = f"subpartida_{subpartida_base}_copia_{subpartida_counts[subpartida_base]}.pdf"
+            else:
+                output_filename = f"subpartida_{subpartida_base}.pdf"
+            
             output_path = os.path.join(self.parent_window.output_path.get(), "declaraciones_separadas", output_filename)
             
             with open(output_path, "wb") as output_file:
