@@ -998,6 +998,7 @@ class PreviewWindow:
                 pdfs_added = False
                 
                 print(f"\nProcesando cliente: {cliente}")
+                subpartida_seen = set()
                 for subpartida_info in subpartidas:
                     subpartida = subpartida_info['numero']
                     # Normalizar el número de subpartida para la búsqueda
@@ -1005,6 +1006,10 @@ class PreviewWindow:
                     if subpartida_base.endswith('0'):
                         subpartida_base = subpartida_base[:-1]
                     print(f"ARCHIVO BASE ORIGINIAL PARA BUSCAR: {subpartida_base}")
+                    
+                    if subpartida_base in subpartida_seen:
+                        continue
+                    subpartida_seen.add(subpartida_base)
                     
                     print(f"Buscando archivos para subpartida {subpartida}")
                     
