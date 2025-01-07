@@ -1,9 +1,9 @@
+# procesador_excel.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 import PyPDF2
 from tkinter import StringVar, Canvas
-import fitz
 import re
 from PIL import Image, ImageTk
 import pytesseract
@@ -191,7 +191,7 @@ class PDFProcessorApp:
         self.process_button = ttk.Button(
             main_frame,
             text="Procesar PDF",
-            command=self.start_processing
+            command=self.start_processing,
         )
         self.process_button.pack(pady=20)
 
@@ -525,33 +525,80 @@ class PDFPreviewDialog(tk.Toplevel):
         self.descripcion_subpartida = descripcion_subpartida  # Descripción de la subpartida
         self.nombre_cliente = cliente
         self.selected_pdfs = []
+        self.selected_variable = tk.BooleanVar(value=False)  # Variable de control para coordinar selección
         self.setup_window()
         self.create_widgets(pdfs, descriptions)
         
+        # Evitar que se cierre la ventana accidentalmente sin selección
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
     def setup_window(self):
         # Set window size to 80% of screen size
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        window_width = int(screen_width * 0.8)
-        window_height = int(screen_height * 0.8)
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
-        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        # screen_width = self.winfo_screenwidth()
+        # screen_height = self.winfo_screenheight()
+        # # window_width = int(screen_width * 0.8)
+        # # window_height = int(screen_height * 0.8)
+
+        # window_width = int(screen_width)
+        # window_height = int(screen_height * 0.8)
+        # x = (screen_width - window_width) // 2
+        # y = (screen_height - window_height) // 2
+        # self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        self.attributes('-fullscreen', True)
+
         
     def create_widgets(self, pdfs, descriptions):
         # Etiqueta con número y descripción de la subpartida
-        question = ttk.Label(
-            self, 
-            text=(
-                f"Para el cliente {self.nombre_cliente}.\n"
-                f"Se encontraron múltiples archivos para esta subpartida.\n"
-                f"Subpartida número: {self.numero_subpartida}\n"
-                f"Descripción de esta subpartida: {self.descripcion_subpartida}\n"
-                "¿Desea guardar todos o seleccionar uno específico?"
-            ),
-            font=('Helvetica', 12, 'bold')
+        # Frame para contener todas las etiquetas
+        text_frame = ttk.Frame(self)
+        text_frame.pack(pady=20)
+        
+        # Título con texto más grande
+        title_label = ttk.Label(
+            text_frame,
+            text=f"Para el cliente {self.nombre_cliente}",
+            font=('Helvetica', 16, 'bold')  # Fuente más grande para el título
         )
-        question.pack(pady=20)
+        title_label.pack(pady=(0, 10))
+        
+        # Mensaje sobre archivos encontrados
+        files_label = ttk.Label(
+            text_frame,
+            text="Se encontraron 2 archivos o más para esta subpartida.",
+            font=('Helvetica', 12)
+        )
+        files_label.pack(pady=2)
+        
+        # Número de subpartida con fondo amarillo
+        subpartida_frame = ttk.Frame(text_frame)
+        subpartida_frame.pack(pady=2, fill='x')
+        subpartida_label = tk.Label(  # Usar tk.Label en lugar de ttk.Label para poder cambiar el color
+            subpartida_frame,
+            text=f"Subpartida número: {self.numero_subpartida}",
+            font=('Helvetica', 12),
+            bg='yellow',  # Fondo amarillo
+            fg='black'    # Texto negro
+        )
+        subpartida_label.pack()
+        
+        # Descripción con fondo blanco
+        descripcion_label = tk.Label(  # Usar tk.Label en lugar de ttk.Label para poder cambiar el color
+            text_frame,
+            text=f"Descripción de esta subpartida: {self.descripcion_subpartida}",
+            font=('Helvetica', 12),
+            bg='white',
+            fg='black',
+            wraplength=800  # Para que el texto se ajuste si es muy largo
+        )
+        descripcion_label.pack(pady=2)
+        
+        # Pregunta final
+        question_label = ttk.Label(
+            text_frame,
+            text="¿Desea guardar todos o seleccionar uno específico?",
+            font=('Helvetica', 12)
+        )
+        question_label.pack(pady=(10, 0))
         
         # Descriptions
         desc_frame = ttk.LabelFrame(self, text="Descripciones encontradas")
@@ -575,19 +622,36 @@ class PDFPreviewDialog(tk.Toplevel):
         btn_frame = ttk.Frame(self)
         btn_frame.pack(pady=20)
         
-        ttk.Button(btn_frame, text="Guardar todos", 
-                  command=lambda: self.finish_selection(pdfs)).pack(side=tk.LEFT, padx=10)
-        ttk.Button(btn_frame, text="Guardar seleccionados", 
-                  command=self.save_selected).pack(side=tk.LEFT, padx=10)
+        ttk.Button(
+            btn_frame,
+            text="Guardar todos", 
+            command=lambda: self.finish_selection(pdfs)
+        ).pack(side=tk.LEFT, padx=10)
+        
+        ttk.Button(
+            btn_frame,
+            text="Guardar seleccionados", 
+            command=self.save_selected
+        ).pack(side=tk.LEFT, padx=10)
                   
     def save_selected(self):
-        self.selected_pdfs = [container.pdf_path for container in self.preview_containers 
-                            if container.is_selected]
+        self.selected_pdfs = [
+            container.pdf_path for container in self.preview_containers 
+            if container.is_selected
+        ]
+        self.selected_variable.set(True)  # Indicar que se completó la selección
         self.destroy()
         
     def finish_selection(self, all_pdfs=None):
         self.selected_pdfs = all_pdfs if all_pdfs else self.selected_pdfs
+        self.selected_variable.set(True)  # Indicar que se completó la selección
         self.destroy()
+
+    def on_close(self):
+        """Método para manejar el cierre de la ventana sin selección explícita."""
+        self.selected_variable.set(True)  # Indicar que la ventana se cerró
+        self.destroy()
+
 
 class PDFPreviewContainer(ttk.Frame):
     def __init__(self, parent, pdf_path):
@@ -787,6 +851,9 @@ class PreviewWindow:
         coords = coords or self.last_selection_coords
 
         print(f"\nDetección automática de subpartida: coordenadas {coords}")
+        # Deshabilitar el botón
+        self.zoom_in_button.config(state="disabled")
+        self.zoom_out_button.config(state="disabled")
         try:
             x0, y0, x1, y1 = coords
             page = self.pdf_document[self.current_page]
@@ -1317,6 +1384,7 @@ class PreviewWindow:
             self.selected_files = {cliente: {} for cliente in self.parent_window.clientes_info.keys()}
 
             # 2. Después de que todos los PDFs separados están guardados, crear los PDFs por cliente
+            self.root.withdraw()  # Ocultar la ventana principal
             for cliente, subpartidas in self.parent_window.clientes_info.items():
                 merger = PdfMerger()
                 pdfs_added = False
@@ -1388,12 +1456,20 @@ class PreviewWindow:
                 merger.close()
 
             messagebox.showinfo("Éxito", "PDFs generados correctamente")
-            self.root.destroy()
-            self.parent_window.root.deiconify()
-
+    
         except Exception as e:
+            # Mostrar error si ocurre algo
             print(f"Error al guardar los PDFs: {str(e)}")
             messagebox.showerror("Error", f"Error al guardar los PDFs: {str(e)}")
+        
+        finally:
+            # Asegurarse de destruir la ventana de previsualización y restaurar la principal
+            try:
+                self.root.destroy()
+            except Exception as e:
+                print(f"Error al cerrar la ventana de previsualización: {str(e)}")
+            self.parent_window.root.deiconify()
+        
     def process_excel_data(self):
         if self.excel_data is None:
             messagebox.showerror("Error", "No se ha cargado un archivo Excel válido")

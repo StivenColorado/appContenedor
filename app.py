@@ -151,8 +151,17 @@ class MainApp:
         ExcelProcessorApp(excel_window)
     
     def open_pdf_processor(self):
+        self.root.withdraw()  # Ocultar ventana principal
         pdf_window = tk.Toplevel(self.root)
         PDFProcessorApp(pdf_window)
+
+        # Definir el comportamiento al cerrar la ventana secundaria
+        def on_close():
+            self.root.deiconify()  # Mostrar ventana principal
+            pdf_window.destroy()  # Cerrar la ventana secundaria
+
+        pdf_window.protocol("WM_DELETE_WINDOW", on_close)
+
 
 if __name__ == "__main__":
     root = tk.Tk()
