@@ -539,8 +539,6 @@ class PDFPreviewDialog(tk.Toplevel):
         # # window_width = int(screen_width * 0.8)
         # # window_height = int(screen_height * 0.8)
 
-        # window_width = int(screen_width)
-        # window_height = int(screen_height * 0.8)
         # x = (screen_width - window_width) // 2
         # y = (screen_height - window_height) // 2
         # self.geometry(f"{window_width}x{window_height}+{x}+{y}")
@@ -660,7 +658,7 @@ class PDFPreviewContainer(ttk.Frame):
         self.is_selected = False
         self.current_page = 0
         self.total_pages = 0
-        self.zoom_factor = 1.0  # Inicializar el factor de zoom
+        self.zoom_factor = 2.0  # Inicializar el factor de zoom
         self.setup_preview()
 
     def setup_preview(self):
@@ -689,7 +687,7 @@ class PDFPreviewContainer(ttk.Frame):
         nav_frame.pack(fill=tk.X, pady=5)
         
         ttk.Button(nav_frame, text="←", command=self.prev_page).pack(side=tk.LEFT, padx=5)
-        self.page_label = ttk.Label(nav_frame, text="Page: 1/1")
+        self.page_label = ttk.Label(nav_frame, text="Pagina: 1/1")
         self.page_label.pack(side=tk.LEFT, expand=True)
         ttk.Button(nav_frame, text="→", command=self.next_page).pack(side=tk.RIGHT, padx=5)
         
@@ -697,8 +695,8 @@ class PDFPreviewContainer(ttk.Frame):
         zoom_frame = ttk.Frame(self)
         zoom_frame.pack(fill=tk.X, pady=5)
         
-        ttk.Button(zoom_frame, text="Zoom In", command=self.zoom_in).pack(side=tk.LEFT, padx=5)
-        ttk.Button(zoom_frame, text="Zoom Out", command=self.zoom_out).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(zoom_frame, text="Acercar 🔎+", command=self.zoom_in).pack(side=tk.LEFT, padx=5)
+        ttk.Button(zoom_frame, text="Alejar 🔍-", command=self.zoom_out).pack(side=tk.RIGHT, padx=5)
         
         # Cargar el PDF
         self.load_pdf()
@@ -735,11 +733,29 @@ class PDFPreviewContainer(ttk.Frame):
                 0, 0, pix.width, pix.height, outline="green", width=5
             )
         
-        self.page_label.config(text=f"Page: {self.current_page + 1}/{self.total_pages}")
+        self.page_label.config(text=f"Pagina: {self.current_page + 1}/{self.total_pages}")
         
         # Configurar las barras de desplazamiento
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
 
+        # **Nuevo código**: Centrar el scroll en la mitad
+        self.center_scroll()
+
+    def center_scroll(self):
+        """Ajustar el scroll en la mitad del lienzo."""
+        bbox = self.canvas.bbox("all")  # Obtener el área de la previsualización
+        if bbox:
+            # Calcular las posiciones iniciales de scroll en x y y para centrar
+            canvas_width = bbox[2] - bbox[0]
+            canvas_height = bbox[3] - bbox[1]
+            
+            center_x = (canvas_width - self.canvas.winfo_width()) // 2
+            center_y = (canvas_height - self.canvas.winfo_height()) // 2
+            
+            # Mover las barras de desplazamiento a la mitad
+            self.canvas.yview_moveto(center_y / canvas_height)
+            self.canvas.xview_moveto(center_x / canvas_width)
+        
     def toggle_selection(self, event=None):
         """Alterna entre seleccionar y deseleccionar."""
         if self.is_selected:
@@ -769,6 +785,7 @@ class PDFPreviewContainer(ttk.Frame):
         """Disminuir el factor de zoom."""
         self.zoom_factor /= 1.2
         self.update_preview()
+
 # Now let's modify the PreviewWindow class to handle automatic subpartida detection:
 class PreviewWindow:
     def __init__(self, input_path, output_path, parent_window):
@@ -780,7 +797,7 @@ class PreviewWindow:
         self.pdf_document = None
         self.preview_image = None
         self.page_data = []
-        self.zoom_factor = 1.5
+        self.zoom_factor = 3.5
         self.last_selection_coords = None
         self.zoom_locked = False
         self.ocr_lang = 'eng'
@@ -996,11 +1013,12 @@ class PreviewWindow:
         zoom_frame = ttk.Frame(control_frame)
         zoom_frame.pack(side=tk.RIGHT, padx=20)
         
+        # Opción 1: Usando caracteres Unicode
         ttk.Label(zoom_frame, text="Zoom:").pack(side=tk.LEFT, padx=5)
-        self.zoom_in_button = ttk.Button(zoom_frame, text="+ (Ctrl +)", command=self.zoom_in)
+        self.zoom_in_button = ttk.Button(zoom_frame, text="🔍+ (Ctrl +)", command=self.zoom_in)
         self.zoom_in_button.pack(side=tk.LEFT, padx=2)
-        
-        self.zoom_out_button = ttk.Button(zoom_frame, text="- (Ctrl -)", command=self.zoom_out)
+
+        self.zoom_out_button = ttk.Button(zoom_frame, text="🔍- (Ctrl -)", command=self.zoom_out)
         self.zoom_out_button.pack(side=tk.LEFT, padx=2)
         
         # Añadir etiqueta para mostrar el factor de zoom actual
