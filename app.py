@@ -147,9 +147,14 @@ class MainApp:
         return os.path.join(base_path, relative_path)
     
     def open_excel_processor(self):
+        self.root.withdraw()  # Ocultar ventana principal
         excel_window = tk.Toplevel(self.root)
         ExcelProcessorApp(excel_window)
-    
+        def on_close():
+            self.root.deiconify()  # Mostrar ventana principal
+            excel_window.destroy()  # Cerrar la ventana secundaria
+
+        excel_window.protocol("WM_DELETE_WINDOW", on_close)
     def open_pdf_processor(self):
         self.root.withdraw()  # Ocultar ventana principal
         pdf_window = tk.Toplevel(self.root)
