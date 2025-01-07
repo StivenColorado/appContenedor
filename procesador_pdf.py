@@ -805,8 +805,11 @@ class PreviewWindow:
         self.descriptions_by_subpartida = {}
         # Añadir tolerancia para coordenadas
         self.coord_tolerance = 20  # píxeles de tolerancia
+
         if platform.system() == 'Windows':
             pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+        elif platform.system() == 'Darwin':  # Mac OS
+            pytesseract.pytesseract.tesseract_cmd = '/usr/local/bin/tesseract'  # Ruta común en Mac
         
         self.show_initial_zoom_message()
         self.setup_window()

@@ -46,4 +46,5 @@ python -m PyInstaller --noconfirm --onefile --windowed --icon=icon.ico --add-dat
 
 
 #mac
-pyinstaller --onefile --windowed --icon=icon.ico --name=ProcesadorExcel excel_processor.py
+pyinstaller --onefile --windowed --icon=icon.ico --name=Procesador --add-binary "/usr/local/bin/tesseract:." app.py
+
