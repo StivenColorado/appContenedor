@@ -15,6 +15,8 @@ from PyPDF2 import PdfMerger
 from openpyxl import load_workbook
 import openpyxl
 import glob
+import fitz  # Para manejar el archivo PDF
+
 # Set TESSDATA_PREFIX environment variable
 os.environ['TESSDATA_PREFIX'] = '/usr/local/share/tessdata/'
 
@@ -516,11 +518,12 @@ class PDFProcessorApp:
         return True
 
 class PDFPreviewDialog(tk.Toplevel):
-    def __init__(self, parent, pdfs, descriptions, numero_subpartida, descripcion_subpartida, title="Seleccionar PDF"):
+    def __init__(self, parent, pdfs, cliente, descriptions, numero_subpartida, descripcion_subpartida, title="Seleccionar PDF"):
         super().__init__(parent)
         self.title(title)
         self.numero_subpartida = numero_subpartida  # Número de subpartida
         self.descripcion_subpartida = descripcion_subpartida  # Descripción de la subpartida
+        self.nombre_cliente = cliente
         self.selected_pdfs = []
         self.setup_window()
         self.create_widgets(pdfs, descriptions)
@@ -540,6 +543,7 @@ class PDFPreviewDialog(tk.Toplevel):
         question = ttk.Label(
             self, 
             text=(
+                f"Para el cliente {self.nombre_cliente}.\n"
                 f"Se encontraron múltiples archivos para esta subpartida.\n"
                 f"Subpartida número: {self.numero_subpartida}\n"
                 f"Descripción de esta subpartida: {self.descripcion_subpartida}\n"
@@ -592,16 +596,31 @@ class PDFPreviewContainer(ttk.Frame):
         self.is_selected = False
         self.current_page = 0
         self.total_pages = 0
+        self.zoom_factor = 1.0  # Inicializar el factor de zoom
         self.setup_preview()
-        
+
     def setup_preview(self):
         self.config(relief="solid", borderwidth=1)
         
-        # Canvas for PDF preview
-        self.canvas = tk.Canvas(self, width=400, height=500, bg='white')
-        self.canvas.pack(pady=10)
+        # Frame para el canvas y barras de desplazamiento
+        canvas_frame = ttk.Frame(self)
+        canvas_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
-        # Navigation buttons
+        # Canvas para la previsualización del PDF con altura fija de 900px
+        self.canvas = tk.Canvas(canvas_frame, bg="white", bd=0, highlightthickness=0, height=900)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Scrollbars
+        self.v_scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=self.canvas.yview)
+        self.v_scrollbar.pack(side=tk.RIGHT, fill="y")
+        
+        self.h_scrollbar = ttk.Scrollbar(self, orient="horizontal", command=self.canvas.xview)
+        self.h_scrollbar.pack(side=tk.BOTTOM, fill="x")
+        
+        # Configurar los scrollbars
+        self.canvas.config(yscrollcommand=self.v_scrollbar.set, xscrollcommand=self.h_scrollbar.set)
+        
+        # Botones de navegación
         nav_frame = ttk.Frame(self)
         nav_frame.pack(fill=tk.X, pady=5)
         
@@ -610,12 +629,19 @@ class PDFPreviewContainer(ttk.Frame):
         self.page_label.pack(side=tk.LEFT, expand=True)
         ttk.Button(nav_frame, text="→", command=self.next_page).pack(side=tk.RIGHT, padx=5)
         
-        # Load PDF
+        # Botones de zoom
+        zoom_frame = ttk.Frame(self)
+        zoom_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(zoom_frame, text="Zoom In", command=self.zoom_in).pack(side=tk.LEFT, padx=5)
+        ttk.Button(zoom_frame, text="Zoom Out", command=self.zoom_out).pack(side=tk.RIGHT, padx=5)
+        
+        # Cargar el PDF
         self.load_pdf()
         
         # Bind click event
         self.canvas.bind("<Button-1>", self.toggle_selection)
-        
+
     def load_pdf(self):
         try:
             self.pdf_document = fitz.open(self.pdf_path)
@@ -623,37 +649,62 @@ class PDFPreviewContainer(ttk.Frame):
             self.update_preview()
         except Exception as e:
             print(f"Error loading PDF: {e}")
-            
+
     def update_preview(self):
         if not hasattr(self, 'pdf_document'):
             return
-            
+        
         page = self.pdf_document[self.current_page]
-        pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))
+        
+        # Usar el factor de zoom para ajustar la escala de la imagen
+        zoom_matrix = fitz.Matrix(self.zoom_factor, self.zoom_factor)
+        pix = page.get_pixmap(matrix=zoom_matrix)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         self.preview_image = ImageTk.PhotoImage(image=img)
         
-        self.canvas.delete("all")
-        self.canvas.create_image(200, 250, anchor=tk.CENTER, image=self.preview_image)
+        self.canvas.delete("all")  # Eliminar elementos previos en el lienzo
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.preview_image)
+
+        # Crear el borde verde solo cuando se selecciona, y hacerlo un poco más grueso
         if self.is_selected:
-            self.canvas.create_rectangle(2, 2, 398, 498, outline='green', width=3)
-            
+            self.canvas.create_rectangle(
+                0, 0, pix.width, pix.height, outline="green", width=5
+            )
+        
         self.page_label.config(text=f"Page: {self.current_page + 1}/{self.total_pages}")
         
+        # Configurar las barras de desplazamiento
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
     def toggle_selection(self, event=None):
-        self.is_selected = not self.is_selected
-        self.update_preview()
+        """Alterna entre seleccionar y deseleccionar."""
+        if self.is_selected:
+            self.is_selected = False
+        else:
+            self.is_selected = True
         
+        # Después de alternar la selección, actualizamos la vista
+        self.update_preview()
+
     def next_page(self):
         if self.current_page < self.total_pages - 1:
             self.current_page += 1
             self.update_preview()
-            
+
     def prev_page(self):
         if self.current_page > 0:
             self.current_page -= 1
             self.update_preview()
 
+    def zoom_in(self):
+        """Incrementar el factor de zoom."""
+        self.zoom_factor *= 1.2
+        self.update_preview()
+
+    def zoom_out(self):
+        """Disminuir el factor de zoom."""
+        self.zoom_factor /= 1.2
+        self.update_preview()
 # Now let's modify the PreviewWindow class to handle automatic subpartida detection:
 class PreviewWindow:
     def __init__(self, input_path, output_path, parent_window):
@@ -1300,6 +1351,7 @@ class PreviewWindow:
                             dialog = PDFPreviewDialog(
                                 self.root,
                                 matching_files,
+                                cliente,
                                 descriptions,
                                 numero_subpartida=subpartida,  # Pasar número de subpartida
                                 descripcion_subpartida=descripcion,  # Pasar descripción
