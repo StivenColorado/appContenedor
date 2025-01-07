@@ -221,7 +221,7 @@ class PDFProcessorApp:
                 if extension != '.xlsx':
                     messagebox.showerror("Error", "Solo se permiten archivos con extensión .xlsx")
                     return
-                    
+
                 self.excel_path_var.set(filename)
                 try:
                     wb = openpyxl.load_workbook(filename, data_only=True)
@@ -250,12 +250,21 @@ class PDFProcessorApp:
                         if 'SUBPARTIDA' in cell_value:
                             subpartida_col = col
                             break
-                    
+
+                    # Buscar la columna descripcion
+                    description_col = None
+                    for col in range(1, sheet.max_column + 1):
+                        cell_value = str(sheet.cell(row=cliente_row, column=col).value or '').upper()
+                        if 'DESCRIPCION DECLARADA - PREINSPECCION' in cell_value:
+                            description_col = col
+                            break
+
                     # Obtener valores únicos de clientes y sus subpartidas
                     self.clientes_info = {}
                     for row in range(cliente_row + 1, sheet.max_row + 1):
                         cliente = sheet.cell(row=row, column=cliente_col).value
                         subpartida = sheet.cell(row=row, column=subpartida_col).value if subpartida_col else None
+                        description = sheet.cell(row=row, column=description_col).value if description_col else None
                         
                         if cliente and isinstance(cliente, str):
                             cliente = cliente.strip()
@@ -268,7 +277,7 @@ class PDFProcessorApp:
                                 if subpartida_num:
                                     self.clientes_info[cliente].append({
                                         'numero': subpartida_num,
-                                        'descripcion': ''  # Puedes agregar la descripción si es necesario
+                                        'descripcion': description  # Puedes agregar la descripción si es necesario
                                     })
                     
                     print("\nClientes y subpartidas detectados:")
@@ -276,6 +285,7 @@ class PDFProcessorApp:
                         print(f"\nCliente: {cliente}")
                         for subpartida_info in info:
                             print(f"  Subpartida: {subpartida_info['numero']}")
+                            print(f"  descripcion: {subpartida_info['descripcion']}")
                     
                 except Exception as e:
                     messagebox.showerror("Error", f"Error al leer el archivo Excel: {str(e)}")
@@ -505,6 +515,146 @@ class PDFProcessorApp:
             return False
         return True
 
+class PDFPreviewDialog(tk.Toplevel):
+    def __init__(self, parent, pdfs, descriptions, numero_subpartida, descripcion_subpartida, title="Seleccionar PDF"):
+        super().__init__(parent)
+        self.title(title)
+        self.numero_subpartida = numero_subpartida  # Número de subpartida
+        self.descripcion_subpartida = descripcion_subpartida  # Descripción de la subpartida
+        self.selected_pdfs = []
+        self.setup_window()
+        self.create_widgets(pdfs, descriptions)
+        
+    def setup_window(self):
+        # Set window size to 80% of screen size
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = int(screen_width * 0.8)
+        window_height = int(screen_height * 0.8)
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+    def create_widgets(self, pdfs, descriptions):
+        # Etiqueta con número y descripción de la subpartida
+        question = ttk.Label(
+            self, 
+            text=(
+                f"Se encontraron múltiples archivos para esta subpartida.\n"
+                f"Subpartida número: {self.numero_subpartida}\n"
+                f"Descripción de esta subpartida: {self.descripcion_subpartida}\n"
+                "¿Desea guardar todos o seleccionar uno específico?"
+            ),
+            font=('Helvetica', 12, 'bold')
+        )
+        question.pack(pady=20)
+        
+        # Descriptions
+        desc_frame = ttk.LabelFrame(self, text="Descripciones encontradas")
+        desc_frame.pack(fill=tk.X, padx=20, pady=10)
+        for desc in descriptions:
+            ttk.Label(desc_frame, text=desc, wraplength=800).pack(pady=5)
+            
+        # PDF Previews
+        preview_frame = ttk.Frame(self)
+        preview_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        # Create preview containers for each PDF
+        self.preview_containers = []
+        for i, pdf_path in enumerate(pdfs):
+            container = PDFPreviewContainer(preview_frame, pdf_path)
+            container.grid(row=0, column=i, padx=10, pady=10, sticky="nsew")
+            self.preview_containers.append(container)
+            preview_frame.grid_columnconfigure(i, weight=1)
+            
+        # Buttons
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(pady=20)
+        
+        ttk.Button(btn_frame, text="Guardar todos", 
+                  command=lambda: self.finish_selection(pdfs)).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="Guardar seleccionados", 
+                  command=self.save_selected).pack(side=tk.LEFT, padx=10)
+                  
+    def save_selected(self):
+        self.selected_pdfs = [container.pdf_path for container in self.preview_containers 
+                            if container.is_selected]
+        self.destroy()
+        
+    def finish_selection(self, all_pdfs=None):
+        self.selected_pdfs = all_pdfs if all_pdfs else self.selected_pdfs
+        self.destroy()
+
+class PDFPreviewContainer(ttk.Frame):
+    def __init__(self, parent, pdf_path):
+        super().__init__(parent)
+        self.pdf_path = pdf_path
+        self.is_selected = False
+        self.current_page = 0
+        self.total_pages = 0
+        self.setup_preview()
+        
+    def setup_preview(self):
+        self.config(relief="solid", borderwidth=1)
+        
+        # Canvas for PDF preview
+        self.canvas = tk.Canvas(self, width=400, height=500, bg='white')
+        self.canvas.pack(pady=10)
+        
+        # Navigation buttons
+        nav_frame = ttk.Frame(self)
+        nav_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(nav_frame, text="←", command=self.prev_page).pack(side=tk.LEFT, padx=5)
+        self.page_label = ttk.Label(nav_frame, text="Page: 1/1")
+        self.page_label.pack(side=tk.LEFT, expand=True)
+        ttk.Button(nav_frame, text="→", command=self.next_page).pack(side=tk.RIGHT, padx=5)
+        
+        # Load PDF
+        self.load_pdf()
+        
+        # Bind click event
+        self.canvas.bind("<Button-1>", self.toggle_selection)
+        
+    def load_pdf(self):
+        try:
+            self.pdf_document = fitz.open(self.pdf_path)
+            self.total_pages = len(self.pdf_document)
+            self.update_preview()
+        except Exception as e:
+            print(f"Error loading PDF: {e}")
+            
+    def update_preview(self):
+        if not hasattr(self, 'pdf_document'):
+            return
+            
+        page = self.pdf_document[self.current_page]
+        pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        self.preview_image = ImageTk.PhotoImage(image=img)
+        
+        self.canvas.delete("all")
+        self.canvas.create_image(200, 250, anchor=tk.CENTER, image=self.preview_image)
+        if self.is_selected:
+            self.canvas.create_rectangle(2, 2, 398, 498, outline='green', width=3)
+            
+        self.page_label.config(text=f"Page: {self.current_page + 1}/{self.total_pages}")
+        
+    def toggle_selection(self, event=None):
+        self.is_selected = not self.is_selected
+        self.update_preview()
+        
+    def next_page(self):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.update_preview()
+            
+    def prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_preview()
+
+# Now let's modify the PreviewWindow class to handle automatic subpartida detection:
 class PreviewWindow:
     def __init__(self, input_path, output_path, parent_window):
         self.root = tk.Toplevel()
@@ -514,17 +664,116 @@ class PreviewWindow:
         self.current_page = 0
         self.pdf_document = None
         self.preview_image = None
-        self.page_data = []  # Lista para almacenar datos de cada página
+        self.page_data = []
         self.zoom_factor = 1.5
+        self.last_selection_coords = None
+        self.zoom_locked = False
         self.ocr_lang = 'eng'
-        
+        # Añadir diccionario para agrupar descripciones
+        self.descriptions_by_subpartida = {}
+        # Añadir tolerancia para coordenadas
+        self.coord_tolerance = 20  # píxeles de tolerancia
         if platform.system() == 'Windows':
             pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
         
+        self.show_initial_zoom_message()
         self.setup_window()
         self.create_widgets()
         self.load_pdf()
+        self.process_excel_descriptions()
 
+    def process_excel_descriptions(self):
+        """
+        Agrupa las descripciones del Excel por subpartida
+        """
+        for cliente, subpartidas in self.parent_window.clientes_info.items():
+            for subpartida_info in subpartidas:
+                subpartida = re.sub(r'[^0-9]', '', subpartida_info['numero'])
+                descripcion = subpartida_info.get('descripcion', '')
+                
+                if subpartida not in self.descriptions_by_subpartida:
+                    self.descriptions_by_subpartida[subpartida] = set()
+                
+                if descripcion:
+                    self.descriptions_by_subpartida[subpartida].add(descripcion)
+        
+        # Imprimir en consola las descripciones agrupadas
+        print("\nDescripciones agrupadas por subpartida:")
+        for subpartida, descriptions in self.descriptions_by_subpartida.items():
+            print(f"\nSubpartida {subpartida}:")
+            for desc in descriptions:
+                print(f"  - {desc}")
+    def show_initial_zoom_message(self):
+            messagebox.showinfo(
+                "Importante",
+                "Por favor, ajuste el zoom para ver claramente el número de subpartida "
+                "antes de hacer la primera selección. Una vez seleccionada la primera "
+                "subpartida, el zoom quedará bloqueado para mantener las coordenadas "
+                "consistentes."
+            )
+    
+    def lock_zoom(self):
+        self.zoom_locked = True
+        self.zoom_in_button.state(['disabled'])
+        self.zoom_out_button.state(['disabled'])
+    
+    def handle_selection(self, coords):
+        if self.current_page == 0 or (self.page_data and self.page_data[-1]['type'] == 'e'):
+            # Primera página o cambio de espaldar a principal
+            self.last_selection_coords = coords
+            if not self.zoom_locked:
+                self.lock_zoom()
+        elif self.last_selection_coords:
+            # Usar las coordenadas guardadas para detección automática
+            self.auto_detect_subpartida(self.last_selection_coords)
+
+    def auto_detect_subpartida(self, coords):
+        try:
+            x0, y0, x1, y1 = coords
+            page = self.pdf_document[self.current_page]
+            pix = page.get_pixmap(matrix=fitz.Matrix(self.zoom_factor, self.zoom_factor))
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            # Ampliar el área de selección con la tolerancia
+            selection = img.crop((
+                max(0, min(x0, x1) - self.coord_tolerance),
+                max(0, min(y0, y1) - self.coord_tolerance),
+                min(pix.width, max(x0, x1) + self.coord_tolerance),
+                min(pix.height, max(y0, y1) + self.coord_tolerance)
+            ))
+            
+            processed_image = self.preprocess_image(selection)
+            text = pytesseract.image_to_string(processed_image, config='--psm 6')
+            
+            # Buscar números con formato de subpartida
+            matches = re.findall(r'\d{4,}(?:\.\d+)*', text)
+            if matches:
+                # Tomar el número más largo encontrado
+                longest_match = max(matches, key=len)
+                self.subpartida_var.set(longest_match)
+                self.tipo_var.set('p')
+                print(f"Subpartida detectada: {longest_match}")
+                
+                # Mostrar descripciones relacionadas si existen
+                subpartida_base = re.sub(r'[^0-9]', '', longest_match)
+                if subpartida_base in self.descriptions_by_subpartida:
+                    print(f"\nDescripciones encontradas para subpartida {longest_match}:")
+                    for desc in self.descriptions_by_subpartida[subpartida_base]:
+                        print(f"  - {desc}")
+            else:
+                print("No se detectó ningún número de subpartida en la selección")
+                self.tipo_var.set('e')
+                
+        except Exception as e:
+            print(f"Error en detección automática: {str(e)}")
+            self.tipo_var.set('e')
+
+    def on_mouse_wheel(self, event):
+        if not self.zoom_locked:
+            if event.delta > 0:
+                self.canvas.yview_scroll(-1, "units")
+            else:
+                self.canvas.yview_scroll(1, "units")
     def preprocess_image(self, image):
         # Convert PIL Image to OpenCV format
         opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
@@ -564,10 +813,12 @@ class PreviewWindow:
 
     def setup_window(self):
         self.root.title("Previsualización y Edición")
-        # Configurar pantalla completa real
+        # Iniciar en pantalla completa
         self.root.attributes('-fullscreen', True)
-        # Agregar botón de escape para salir de pantalla completa
+        # Añadir accesos rápidos
         self.root.bind('<Escape>', lambda e: self.toggle_fullscreen())
+        self.root.bind('<Control-plus>', lambda e: self.zoom_in())
+        self.root.bind('<Control-minus>', lambda e: self.zoom_out())
         
     def toggle_fullscreen(self):
         if self.root.attributes('-fullscreen'):
@@ -618,15 +869,20 @@ class PreviewWindow:
         self.radio_espaldar = ttk.Radiobutton(tipo_frame, text="Espaldar", value='e', variable=self.tipo_var)
         self.radio_espaldar.pack(side=tk.LEFT, padx=2)
         
-        # Botones de zoom
+         # Mejorar los botones de zoom
         zoom_frame = ttk.Frame(control_frame)
         zoom_frame.pack(side=tk.RIGHT, padx=20)
         
-        self.zoom_in_button = ttk.Button(zoom_frame, text="Aumentar Zoom", command=self.zoom_in)
-        self.zoom_in_button.pack(side=tk.LEFT, padx=5)
+        ttk.Label(zoom_frame, text="Zoom:").pack(side=tk.LEFT, padx=5)
+        self.zoom_in_button = ttk.Button(zoom_frame, text="+ (Ctrl +)", command=self.zoom_in)
+        self.zoom_in_button.pack(side=tk.LEFT, padx=2)
         
-        self.zoom_out_button = ttk.Button(zoom_frame, text="Disminuir Zoom", command=self.zoom_out)
-        self.zoom_out_button.pack(side=tk.LEFT, padx=5)
+        self.zoom_out_button = ttk.Button(zoom_frame, text="- (Ctrl -)", command=self.zoom_out)
+        self.zoom_out_button.pack(side=tk.LEFT, padx=2)
+        
+        # Añadir etiqueta para mostrar el factor de zoom actual
+        self.zoom_label = ttk.Label(zoom_frame, text="150%")
+        self.zoom_label.pack(side=tk.LEFT, padx=5)
         
         # Botones de acción
         action_frame = ttk.Frame(control_frame)
@@ -666,12 +922,20 @@ class PreviewWindow:
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
     def zoom_in(self):
-        self.zoom_factor += 0.3
-        self.update_page_display()
+        if not self.zoom_locked:
+            self.zoom_factor += 0.3
+            self.update_zoom_label()
+            self.update_page_display()
 
     def zoom_out(self):
-        self.zoom_factor = max(0.3, self.zoom_factor - 0.3)
-        self.update_page_display()
+        if not self.zoom_locked:
+            self.zoom_factor = max(0.3, self.zoom_factor - 0.3)
+            self.update_zoom_label()
+            self.update_page_display()
+    
+    def update_zoom_label(self):
+        zoom_percentage = int(self.zoom_factor * 100)
+        self.zoom_label.config(text=f"{zoom_percentage}%")
 
     def save_and_next(self):
         # Guardar datos de la página actual
@@ -1001,6 +1265,8 @@ class PreviewWindow:
                 subpartida_seen = set()
                 for subpartida_info in subpartidas:
                     subpartida = subpartida_info['numero']
+                    descripcion = subpartida_info.get('descripcion', '')
+                    print(f"descripcion en  save PDFS method: {descripcion}")
                     # Normalizar el número de subpartida para la búsqueda
                     subpartida_base = re.sub(r'[^0-9]', '', subpartida)
                     if subpartida_base.endswith('0'):
@@ -1024,14 +1290,31 @@ class PreviewWindow:
                     
                     if matching_files:
                         if len(matching_files) > 1:
-                            self.show_preview(cliente, subpartida, matching_files)
-                            selected_file = self.selected_files[cliente][subpartida]
-                            print(f"Añadiendo archivo seleccionado: {selected_file}")
-                            merger.append(selected_file)
+                            # Obtener descripciones del Excel
+                            descriptions = [
+                                subp.get('descripcion', '')
+                                for subp in self.parent_window.clientes_info[cliente]
+                                if re.sub(r'[^0-9]', '', subp['numero']) == subpartida_base
+                            ]
+                            
+                            dialog = PDFPreviewDialog(
+                                self.root,
+                                matching_files,
+                                descriptions,
+                                numero_subpartida=subpartida,  # Pasar número de subpartida
+                                descripcion_subpartida=descripcion,  # Pasar descripción
+                                title="Seleccionar PDF para Subpartida"
+                            )
+                            self.root.wait_window(dialog)
+                            
+                            selected_files = dialog.selected_pdfs
+                            if selected_files:
+                                for file in selected_files:
+                                    merger.append(file)
+                                    pdfs_added = True
                         else:
-                            print(f"Añadiendo archivo: {matching_files[0]}")
                             merger.append(matching_files[0])
-                        pdfs_added = True
+                            pdfs_added = True
 
                 if pdfs_added:
                     cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', str(cliente))
