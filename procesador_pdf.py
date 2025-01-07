@@ -778,7 +778,15 @@ class PreviewWindow:
             # Usar las coordenadas guardadas para detección automática
             self.auto_detect_subpartida(self.last_selection_coords)
 
-    def auto_detect_subpartida(self, coords):
+    # TODO: auto detect subpartida
+    def auto_detect_subpartida(self, coords=None):
+        # Si no se pasan coordenadas, usa las predeterminadas
+        if coords is None and self.last_selection_coords is None:
+            print("No se han proporcionado coordenadas para la detección.")
+            return
+        coords = coords or self.last_selection_coords
+
+        print(f"\nDetección automática de subpartida: coordenadas {coords}")
         try:
             x0, y0, x1, y1 = coords
             page = self.pdf_document[self.current_page]
@@ -799,13 +807,11 @@ class PreviewWindow:
             # Buscar números con formato de subpartida
             matches = re.findall(r'\d{4,}(?:\.\d+)*', text)
             if matches:
-                # Tomar el número más largo encontrado
                 longest_match = max(matches, key=len)
                 self.subpartida_var.set(longest_match)
                 self.tipo_var.set('p')
                 print(f"Subpartida detectada: {longest_match}")
                 
-                # Mostrar descripciones relacionadas si existen
                 subpartida_base = re.sub(r'[^0-9]', '', longest_match)
                 if subpartida_base in self.descriptions_by_subpartida:
                     print(f"\nDescripciones encontradas para subpartida {longest_match}:")
@@ -814,11 +820,10 @@ class PreviewWindow:
             else:
                 print("No se detectó ningún número de subpartida en la selección")
                 self.tipo_var.set('e')
-                
+            
         except Exception as e:
             print(f"Error en detección automática: {str(e)}")
             self.tipo_var.set('e')
-
     def on_mouse_wheel(self, event):
         if not self.zoom_locked:
             if event.delta > 0:
@@ -1105,19 +1110,17 @@ class PreviewWindow:
 
         return True
     
-    
+    # TODO: 
     def update_page_display(self):
         if not self.pdf_document:
             return
-            
+
         try:
             page = self.pdf_document[self.current_page]
-            # Usar una matriz de zoom más alta para mejor calidad
             pix = page.get_pixmap(matrix=fitz.Matrix(self.zoom_factor, self.zoom_factor))
-            
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             self.preview_image = ImageTk.PhotoImage(image=img)
-            
+
             # Actualizar canvas
             self.canvas.delete("all")
             self.canvas.config(scrollregion=(0, 0, pix.width, pix.height))
@@ -1125,43 +1128,44 @@ class PreviewWindow:
             
             # Actualizar etiqueta de página
             self.page_label.config(text=f"Página: {self.current_page + 1}/{self.pdf_document.page_count}")
-            
-            # Obtener el texto completo de la página
-            text = page.get_text("text")
-            if isinstance(text, bytes):
-                text = text.decode('utf-8')
-            print(f"Texto completo de la página {self.current_page + 1}:")
-            print(text)  # Debug: mostrar todo el texto de la página
-            
-            # Intentar detectar subpartida en la página actual usando múltiples patrones
-            patterns = [
-                r'Subpartida\s+[Aa]rancelaria\s*[:#]?\s*(\d+)',
-                r'SUBPARTIDA\s+ARANCELARIA\s*[:#]?\s*(\d+)',
-                r'Subpartida\s*[:#]?\s*(\d+)',
-            ]
-            
-            found_subpartida = False
-            for pattern in patterns:
-                match = re.search(pattern, text)
-                if match:
-                    detected_number = match.group(1).strip()
-                    print(f"Subpartida detectada: {detected_number}")  # Debug
-                    self.subpartida_var.set(detected_number)
-                    found_subpartida = True
-                    break
-            
-            if not found_subpartida:
-                print("No se detectó subpartida en esta página")  # Debug
-            
-            # Actualizar el tipo de página y subpartida si existen
+
+            # Si hay coordenadas de selección previas, usar esas para detectar la subpartida
+            if self.last_selection_coords:
+                print(f"Usando coordenadas previas para detección: {self.last_selection_coords}")
+                self.auto_detect_subpartida(coords=self.last_selection_coords)
+            else:
+                text = page.get_text("text")
+                if isinstance(text, bytes):
+                    text = text.decode('utf-8')
+                print(f"Texto completo de la página {self.current_page + 1}:")
+                print(text)  # Debug
+
+                # Intentar detectar subpartida
+                patterns = [
+                    r'Subpartida\s+[Aa]rancelaria\s*[:#]?\s*(\d+)',
+                    r'SUBPARTIDA\s+ARANCELARIA\s*[:#]?\s*(\d+)',
+                    r'Subpartida\s*[:#]?\s*(\d+)',
+                ]
+                
+                found_subpartida = False
+                for pattern in patterns:
+                    match = re.search(pattern, text)
+                    if match:
+                        detected_number = match.group(1).strip()
+                        print(f"Subpartida detectada: {detected_number}")  # Debug
+                        self.subpartida_var.set(detected_number)
+                        found_subpartida = True
+                        break
+                
+                if not found_subpartida:
+                    print("No se detectó subpartida en esta página")  # Debug
+
+            # Actualizar tipo de página y subpartida
             if self.current_page < len(self.page_data):
                 current_data = self.page_data[self.current_page]
                 self.tipo_var.set(current_data['type'])
-                if current_data['subpartida']:
-                    self.subpartida_var.set(current_data['subpartida'])
-                else:
-                    self.subpartida_var.set('')
-            
+                self.subpartida_var.set(current_data['subpartida'] or '')
+
             # Asegurar que los widgets estén visibles
             self.subpartida_entry.pack(side=tk.LEFT, padx=5)
             self.radio_principal.pack(side=tk.LEFT, padx=2)
@@ -1172,12 +1176,12 @@ class PreviewWindow:
                 self.save_button.pack(side=tk.RIGHT, padx=5)
             else:
                 self.save_button.pack_forget()
-                
+
         except Exception as e:
             error_msg = f"Error en update_page_display: {str(e)}"
             print(error_msg)  # Debug
             messagebox.showerror("Error", f"Error al actualizar la visualización: {str(e)}")
-    
+
     def next_page(self):
         if self.pdf_document and self.current_page < self.pdf_document.page_count - 1:
             self.current_page += 1
@@ -1203,12 +1207,13 @@ class PreviewWindow:
         cur_y = self.canvas.canvasy(event.y)
         self.canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
         
+    # TODO: donde se detecta el numero
     def on_button_release(self, event):
         try:
             coords = self.canvas.coords(self.rect)
             if not coords:
                 return
-                
+            
             x0, y0, x1, y1 = coords
             page = self.pdf_document[self.current_page]
             
@@ -1238,12 +1243,16 @@ class PreviewWindow:
                 self.subpartida_var.set(detected_number)
                 print(f"Número detectado: {detected_number}")
             
+            # Guardar las coordenadas seleccionadas para futuras páginas
+            self.last_selection_coords = [x0, y0, x1, y1]
+            print(f"Coordenadas almacenadas para futuras detecciones: {self.last_selection_coords}")
+            
             self.canvas.delete(self.rect)
             
         except Exception as e:
             print(f"Error en OCR: {str(e)}")
-            messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")     
-    
+            messagebox.showerror("Error", f"Error al procesar el texto: {str(e)}")
+
     def show_preview(self, cliente, subpartida, matching_files):
         """
         Muestra una vista previa de los archivos duplicados para que el usuario pueda seleccionar cuál desea incluir.
