@@ -461,7 +461,7 @@ class PDFProcessorApp:
     def show_pdf_selection_window(self, pdf1_path, pdf2_path, descripcion):
         selection_window = tk.Toplevel(self.root)
         selection_window.title("Seleccionar PDF")
-        selection_window.geometry("800x600")
+        selection_window.geometry("800x400")
         
         # Mostrar descripción
         desc_label = ttk.Label(selection_window, text=f"Descripción: {descripcion}", wraplength=700)
@@ -534,15 +534,15 @@ class PDFPreviewDialog(tk.Toplevel):
 
     def setup_window(self):
         # Set window size to 80% of screen size
-        # screen_width = self.winfo_screenwidth()
-        # screen_height = self.winfo_screenheight()
-        # # window_width = int(screen_width * 0.8)
-        # # window_height = int(screen_height * 0.8)
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = int(screen_width)
+        window_height = int(screen_height)
 
-        # x = (screen_width - window_width) // 2
-        # y = (screen_height - window_height) // 2
-        # self.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        self.attributes('-fullscreen', True)
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        # self.attributes('-fullscreen', True)
 
         
     def create_widgets(self, pdfs, descriptions):
@@ -606,7 +606,7 @@ class PDFPreviewDialog(tk.Toplevel):
             
         # PDF Previews
         preview_frame = ttk.Frame(self)
-        preview_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        preview_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=2)
         
         # Create preview containers for each PDF
         self.preview_containers = []
@@ -658,7 +658,7 @@ class PDFPreviewContainer(ttk.Frame):
         self.is_selected = False
         self.current_page = 0
         self.total_pages = 0
-        self.zoom_factor = 2.0  # Inicializar el factor de zoom
+        self.zoom_factor = 1.2  # Inicializar el factor de zoom
         self.setup_preview()
 
     def setup_preview(self):
@@ -668,8 +668,8 @@ class PDFPreviewContainer(ttk.Frame):
         canvas_frame = ttk.Frame(self)
         canvas_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
-        # Canvas para la previsualización del PDF con altura fija de 900px
-        self.canvas = tk.Canvas(canvas_frame, bg="white", bd=0, highlightthickness=0, height=900)
+        # Canvas para la previsualización del PDF con altura fija de 500px
+        self.canvas = tk.Canvas(canvas_frame, bg="white", bd=0, highlightthickness=0, height=200)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Scrollbars

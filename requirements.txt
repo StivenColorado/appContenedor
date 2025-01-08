@@ -1,5 +1,11 @@
 pandas 
 numpy 
-openpyxl
+openpyxl 
 fpdf 
-Pillow
+Pillow 
+PyMuPDF 
+python-docx 
+pytesseract 
+pdf2image 
+opencv-python
+pyinstaller

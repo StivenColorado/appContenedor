@@ -12,7 +12,7 @@ C:\Users\mpc\AppData\Local\Programs\Python\Python313\Scripts
 
 # En Windows
 python -m venv venv
-venv\Scripts\activate
+source venv\Scripts\activate
 
 # En Mac/Linux
 python3 -m venv venv
