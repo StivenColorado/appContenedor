@@ -19,7 +19,7 @@ python3 -m venv venv
 source venv/bin/activate
 
 #instalar librerias
-pip install pandas numpy openpyxl fpdf Pillow PyMuPDF python-docx pytesseract pdf2image opencv-python
+pip install pandas numpy openpyxl fpdf Pillow PyMuPDF python-docx pytesseract pdf2image opencv-python pyinstaller
 # Asegúrate de que el entorno virtual está activado
 python excel_processor.py
 

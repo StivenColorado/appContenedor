@@ -538,9 +538,11 @@ class PDFPreviewDialog(tk.Toplevel):
         screen_height = self.winfo_screenheight()
         window_width = int(screen_width)
         window_height = int(screen_height)
+        print(f"tamaño de pantalla ancho: {screen_width} alto: {screen_height}")
 
         x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
+        # y = (screen_height - window_height) // 
+        y = window_height
         self.geometry(f"{window_width}x{window_height}+{x}+{y}")
         # self.attributes('-fullscreen', True)
 
@@ -633,10 +635,21 @@ class PDFPreviewDialog(tk.Toplevel):
         ).pack(side=tk.LEFT, padx=10)
                   
     def save_selected(self):
+        # Verificar si no hay ningún archivo seleccionado
         self.selected_pdfs = [
-            container.pdf_path for container in self.preview_containers 
+            container.pdf_path for container in self.preview_containers
             if container.is_selected
         ]
+        
+        if not self.selected_pdfs:
+            # Mostrar mensaje de advertencia si no hay selección
+            tk.messagebox.showwarning(
+                "Sin selección",
+                "No ha seleccionado ningún archivo para guardar."
+            )
+            return  # No proceder si no hay selección
+
+        # Si hay selección, continuar
         self.selected_variable.set(True)  # Indicar que se completó la selección
         self.destroy()
         
@@ -649,7 +662,6 @@ class PDFPreviewDialog(tk.Toplevel):
         """Método para manejar el cierre de la ventana sin selección explícita."""
         self.selected_variable.set(True)  # Indicar que la ventana se cerró
         self.destroy()
-
 
 class PDFPreviewContainer(ttk.Frame):
     def __init__(self, parent, pdf_path):
@@ -669,7 +681,7 @@ class PDFPreviewContainer(ttk.Frame):
         canvas_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
         # Canvas para la previsualización del PDF con altura fija de 500px
-        self.canvas = tk.Canvas(canvas_frame, bg="white", bd=0, highlightthickness=0, height=200)
+        self.canvas = tk.Canvas(canvas_frame, bg="white", bd=0, highlightthickness=0, height=500)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Scrollbars
@@ -962,7 +974,10 @@ class PreviewWindow:
         self.root.bind('<Escape>', lambda e: self.toggle_fullscreen())
         self.root.bind('<Control-plus>', lambda e: self.zoom_in())
         self.root.bind('<Control-minus>', lambda e: self.zoom_out())
-        
+        # Agregar este binding para Enter
+        self.root.bind('<Return>', lambda e: self.save_and_next())  # Nueva línea
+        # Vincular la tecla de flecha izquierda (←) al botón de la función prev_page
+        self.root.bind('<Left>', lambda e: self.prev_page())
     def toggle_fullscreen(self):
         if self.root.attributes('-fullscreen'):
             self.root.attributes('-fullscreen', False)
