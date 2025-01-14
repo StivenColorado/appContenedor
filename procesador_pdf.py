@@ -1483,7 +1483,7 @@ class PreviewWindow:
 
                 if pdfs_added:
                     cliente_filename = re.sub(r'[<>:"/\\|?*]', '_', str(cliente))
-                    output_path = os.path.join(clients_dir, f"{cliente_filename}.pdf")
+                    output_path = os.path.join(clients_dir, f"DECLAS_{cliente_filename}.pdf")
                     merger.write(output_path)
                     print(f"PDF creado para cliente {cliente}: {output_path}")
                 else:
