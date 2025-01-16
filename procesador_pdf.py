@@ -1047,7 +1047,7 @@ class PreviewWindow:
         action_frame = ttk.Frame(control_frame)
         action_frame.pack(side=tk.RIGHT)
         
-        self.save_button = ttk.Button(action_frame, text="Guardar Todo", command=self.save_pdfs)
+        self.save_button = ttk.Button(action_frame, text="Guardar Todo", command=self.save_pdfs_and_next)
         self.save_button.pack(side=tk.RIGHT, padx=5)
         
         # Configurar teclas rápidas
@@ -1080,6 +1080,12 @@ class PreviewWindow:
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
+        
+    
+    def save_pdfs_and_next(self): #funcion que garantiza que se guarde la informacion de la utlima hoja al presionar guardar todo
+        self.save_and_next()  # Llama a la función de avanzar
+        self.save_pdfs()     # Llama a la función de guardar
+
     def zoom_in(self):
         if not self.zoom_locked:
             self.zoom_factor += 0.3
