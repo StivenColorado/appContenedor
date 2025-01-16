@@ -977,7 +977,7 @@ class PreviewWindow:
         # Agregar este binding para Enter
         self.root.bind('<Return>', lambda e: self.save_and_next())  # Nueva línea
         # Vincular la tecla de flecha izquierda (←) al botón de la función prev_page
-        self.root.bind('<Left>', lambda e: self.prev_page())
+        # self.root.bind('<Left>', lambda e: self.prev_page())
     def toggle_fullscreen(self):
         if self.root.attributes('-fullscreen'):
             self.root.attributes('-fullscreen', False)
