@@ -78,7 +78,7 @@ def center_window(window):
     width = window.winfo_width()
     height = window.winfo_height()
     x = (window.winfo_screenwidth() // 2) - (width // 2)
-    y = (window.winfo_screenheight() // 2) - (height // 2)
+    y = (window.winfo_screenheight() // 2) - (height // 2) 
     window.geometry(f'{width}x{height}+{x}+{y}')
 
 def resource_path(relative_path):
@@ -126,7 +126,7 @@ class ExcelProcessorApp:
         # mostrar la pantalla
         self.root.deiconify()
         self.root.title("Procesador de Excel")
-        self.root.geometry("700x500")
+        self.root.geometry("700x600")
         center_window(root)
         
         # Configurar el estilo
@@ -442,7 +442,7 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
 def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row, zafiro_number):
     if 'ANOTACION' in brand_df.columns:
         brand_df = brand_df.drop('ANOTACION', axis=1)
-    filename = f"MARCA_{marca}_CONSO_{consolidado}-{year}.xlsx"
+    filename = f"MARCA_{marca}_CONSO_{year}-{consolidado}.xlsx"
     filepath = os.path.join(output_path, filename)
     
     wb = Workbook()
@@ -853,6 +853,98 @@ def find_brand_column(df):
             return col
     return None
 
+# def create_pdf_results(excel_path, pdf_path, has_missing_info):
+#     try:
+#         workbook = load_workbook(excel_path, data_only=True)
+#         sheet = workbook['Principal']
+        
+#         pdf = FPDF()
+#         pdf.add_page()
+#         pdf.set_font('Arial', size=10)
+        
+#         # Definimos anchos de columna más pequeños para centrar
+#         col_widths = [45, 25, 30, 30, 45]  # Reducimos los anchos
+#         row_height = 8
+#         page_width = sum(col_widths)
+        
+#         # Calculamos el margen izquierdo para centrar la tabla
+#         margin_left = (210 - page_width) / 2  # 210 es el ancho de una página A4
+#         pdf.set_left_margin(margin_left)
+        
+#         pdf.set_font('Arial', 'B', 12)
+#         pdf.cell(page_width, 10, 'Resultados', 0, 1, 'C')
+#         pdf.ln(10)
+        
+#         pdf.set_font('Arial', 'B', 10)
+#         headers = ['SHIPPING MARK MARCA', 'CARTONES', 'CUBICAJE', 'PESO', 'ANOTACION']
+#         for i, header in enumerate(headers):
+#             pdf.cell(col_widths[i], row_height, header, 1, 0, 'C')
+#         pdf.ln(row_height)
+
+#         pdf.set_font('Arial', '', 10)
+#         total_values = [0, 0, 0]
+
+#         for row in sheet.iter_rows(min_row=2, values_only=True):
+#             if row[0] == 'TOTAL':
+#                 continue
+
+#             for idx, value in enumerate(row[1:4]):
+#                 if value not in (None, 'None'):
+#                     try:
+#                         total_values[idx] += float(str(value).replace(',', '.'))
+#                     except (ValueError, TypeError):
+#                         pass
+
+#             for i, value in enumerate(row):
+#                 text = cleanup_text_for_pdf(str(value)) if value not in (None, 'None') else ''
+                
+#                 # Reducir el tamaño de la letra para valores con muchos decimales
+#                 if i in [2, 3]:  # Columnas de CUBICAJE y PESO
+#                     if len(text) > 8:  # Si el número es largo
+#                         pdf.set_font('Arial', '', 8)  # Reducimos a tamaño 8
+#                     else:
+#                         pdf.set_font('Arial', '', 10)  # Volvemos al tamaño normal
+                
+#                 pdf.cell(col_widths[i], row_height, text, 1, 0, 'C')
+#             pdf.ln(row_height)
+
+#         # Format totals with smaller font for long numbers
+#         pdf.set_font('Arial', 'B', 10)
+#         pdf.cell(col_widths[0], row_height, 'TOTAL', 1, 0, 'C')
+        
+#         # CARTONES total
+#         total_cartones = f"{total_values[0]:.0f}"
+#         pdf.cell(col_widths[1], row_height, total_cartones, 1, 0, 'C')
+        
+#         # CUBICAJE total
+#         total_cubicaje = f"{total_values[1]:.2f}".replace('.', ',')
+#         font_size = 8 if len(total_cubicaje) > 8 else 10
+#         pdf.set_font('Arial', 'B', font_size)
+#         pdf.cell(col_widths[2], row_height, total_cubicaje, 1, 0, 'C')
+        
+#         # PESO total
+#         total_peso = f"{total_values[2]:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+#         font_size = 8 if len(total_peso) > 8 else 10
+#         pdf.set_font('Arial', 'B', font_size)
+#         pdf.cell(col_widths[3], row_height, total_peso, 1, 0, 'C')
+        
+#         # Última columna vacía
+#         pdf.set_font('Arial', 'B', 10)
+#         pdf.cell(col_widths[4], row_height, '', 1, 0, 'C')
+        
+#         # Añadimos el texto de registros sin información con fuente más pequeña
+#         if has_missing_info:
+#             pdf.ln(15)
+#             pdf.set_left_margin(10)  # Reseteamos el margen
+#             pdf.set_font('Arial', 'B', 8)  # Reducimos el tamaño de la fuente
+#             pdf.cell(0, row_height, 'hay registros sin informacion', 0, 1, 'C')
+        
+#         pdf.output(pdf_path)
+        
+#     except Exception as e:
+#         logging.error(f"Error creating PDF: {str(e)}")
+#         raise
+    
 def create_pdf_results(excel_path, pdf_path, has_missing_info):
     try:
         workbook = load_workbook(excel_path, data_only=True)
@@ -898,17 +990,18 @@ def create_pdf_results(excel_path, pdf_path, has_missing_info):
             for i, value in enumerate(row):
                 text = cleanup_text_for_pdf(str(value)) if value not in (None, 'None') else ''
                 
-                # Reducir el tamaño de la letra para valores con muchos decimales
-                if i in [2, 3]:  # Columnas de CUBICAJE y PESO
-                    if len(text) > 8:  # Si el número es largo
-                        pdf.set_font('Arial', '', 8)  # Reducimos a tamaño 8
-                    else:
-                        pdf.set_font('Arial', '', 10)  # Volvemos al tamaño normal
+                # Redondear a 2 decimales para CUBICAJE y PESO
+                if i in [2, 3] and text and text not in ('None', ''):  # Columnas de CUBICAJE y PESO
+                    try:
+                        num_value = float(text.replace(',', '.'))
+                        text = f"{num_value:.2f}".replace('.', ',')
+                    except (ValueError, TypeError):
+                        pass
                 
                 pdf.cell(col_widths[i], row_height, text, 1, 0, 'C')
             pdf.ln(row_height)
 
-        # Format totals with smaller font for long numbers
+        # Format totals 
         pdf.set_font('Arial', 'B', 10)
         pdf.cell(col_widths[0], row_height, 'TOTAL', 1, 0, 'C')
         
@@ -916,20 +1009,15 @@ def create_pdf_results(excel_path, pdf_path, has_missing_info):
         total_cartones = f"{total_values[0]:.0f}"
         pdf.cell(col_widths[1], row_height, total_cartones, 1, 0, 'C')
         
-        # CUBICAJE total
+        # CUBICAJE total - siempre con 2 decimales
         total_cubicaje = f"{total_values[1]:.2f}".replace('.', ',')
-        font_size = 8 if len(total_cubicaje) > 8 else 10
-        pdf.set_font('Arial', 'B', font_size)
         pdf.cell(col_widths[2], row_height, total_cubicaje, 1, 0, 'C')
         
-        # PESO total
-        total_peso = f"{total_values[2]:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-        font_size = 8 if len(total_peso) > 8 else 10
-        pdf.set_font('Arial', 'B', font_size)
+        # PESO total - siempre con 2 decimales
+        total_peso = f"{total_values[2]:.2f}".replace('.', ',')
         pdf.cell(col_widths[3], row_height, total_peso, 1, 0, 'C')
         
         # Última columna vacía
-        pdf.set_font('Arial', 'B', 10)
         pdf.cell(col_widths[4], row_height, '', 1, 0, 'C')
         
         # Añadimos el texto de registros sin información con fuente más pequeña
@@ -944,7 +1032,7 @@ def create_pdf_results(excel_path, pdf_path, has_missing_info):
     except Exception as e:
         logging.error(f"Error creating PDF: {str(e)}")
         raise
-    
+
 def cleanup_text_for_pdf(text):
     """
     Helper function to clean up text for PDF creation.
