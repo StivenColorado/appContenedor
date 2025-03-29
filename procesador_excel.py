@@ -1,4 +1,3 @@
-# Imports necesarios
 import pandas as pd
 import numpy as np
 import tkinter as tk  # Add this import
@@ -207,6 +206,29 @@ class ExcelProcessorApp:
         )
         self.consolidado_entry.pack(side=tk.LEFT, padx=5)
         
+        # Año manual
+        self.year_frame = ttk.Frame(self.file_frame)
+        self.year_frame.pack(fill=tk.X, pady=10)
+        
+        self.year_label = ttk.Label(
+            self.year_frame,
+            text="Año (últimos dos dígitos):",
+            font=('Helvetica', 10)
+        )
+        self.year_label.pack(side=tk.LEFT)
+        
+        self.year_var = tk.StringVar()
+        self.year_entry = ttk.Entry(
+            self.year_frame,
+            textvariable=self.year_var,
+            width=10
+        )
+        self.year_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Sugerir el año actual
+        current_year = str(datetime.now().year)[-2:]
+        self.year_var.set(current_year)
+
         # Output directory
         self.output_path = tk.StringVar()
         self.output_label = ttk.Label(
@@ -316,16 +338,22 @@ class ExcelProcessorApp:
 
     def run_processing(self):
         try:
+            input_path = self.input_path.get()
+            output_path = self.output_path.get()
             consolidado = self.consolidado_var.get()
-            process_excel(self.input_path.get(), self.output_path.get(), consolidado)
-            self.status_label.config(text="¡Archivos procesados correctamente!")
+            year = self.year_var.get()
+
+            process_excel(input_path, output_path, consolidado, year)
+
+            self.status_label.config(text="¡Archivos procesados correctamente!", foreground="green")
             messagebox.showinfo(
                 "Éxito",
                 "Los archivos han sido procesados correctamente"
             )
         except Exception as e:
-            self.status_label.config(text="Error al procesar los archivos")
-            messagebox.showerror("Error", str(e))
+            logging.error(f"Error en run_processing: {str(e)}")
+            self.status_label.config(text="Error al procesar los archivos", foreground="red")
+            messagebox.showerror("Error", f"Ocurrió un error al procesar el archivo: {str(e)}")
         finally:
             self.process_button.state(['!disabled'])
 
@@ -638,7 +666,7 @@ def add_annotation_column(df):
     df['ANOTACION'] = df[marca_col].map(annotations)
     return df
 
-def process_excel(input_path, output_path, consolidado):
+def process_excel(input_path, output_path, consolidado, year):
     temp_dir = tempfile.mkdtemp()
     try:
         workbook = load_workbook(input_path)
@@ -706,7 +734,6 @@ def process_excel(input_path, output_path, consolidado):
         has_missing_info = df['ANOTACION'].str.contains('hay registros sin informacion').any()
         
         # Create results files
-        year = str(datetime.now().year)[-2:]
         results_basename = f"RESULTADOS_CONSO_{consolidado}_{year}"
         results_excel = os.path.join(output_path, f"{results_basename}.xlsx")
         results_pdf = os.path.join(output_path, f"{results_basename}.pdf")
