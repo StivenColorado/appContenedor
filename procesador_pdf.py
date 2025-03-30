@@ -528,30 +528,61 @@ class PDFPreviewDialog(tk.Toplevel):
         self.selected_variable = tk.BooleanVar(value=False)  # Variable de control para coordinar selección
         self.setup_window()
         self.create_widgets(pdfs, descriptions)
-        
         # Evitar que se cierre la ventana accidentalmente sin selección
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def setup_window(self):
-        # Set window size to 80% of screen size
+        # Obtener el tamaño de la pantalla
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        window_width = int(screen_width)
-        window_height = int(screen_height)
-        print(f"tamaño de pantalla ancho: {screen_width} alto: {screen_height}")
-
+        
+        # Definir el tamaño de la ventana (80% del tamaño de la pantalla)
+        window_width = int(screen_width * 0.8)
+        window_height = int(screen_height * 0.8)
+        
+        # Calcular posición para centrar la ventana
         x = (screen_width - window_width) // 2
-        # y = (screen_height - window_height) // 
-        y = window_height
+        y = (screen_height - window_height) // 2  # Corregido: centrar verticalmente
+        
+        # Aplicar la geometría
         self.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        # self.attributes('-fullscreen', True)
+        
+        # Hacer que la ventana sea redimensionable
+        self.resizable(True, True)
+        
+        # Establecer tamaño mínimo para asegurar que los botones sean visibles
+        self.minsize(800, 600)
+        
+        # Elevar la ventana al frente
+        self.lift()
+        self.focus_force()
 
         
     def create_widgets(self, pdfs, descriptions):
+        # Estructura principal con scroll para asegurar que todo sea visible
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Añadir una barra de desplazamiento vertical
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
         # Etiqueta con número y descripción de la subpartida
         # Frame para contener todas las etiquetas
-        text_frame = ttk.Frame(self)
-        text_frame.pack(pady=20)
+        text_frame = ttk.Frame(scrollable_frame)
+        text_frame.pack(pady=20, fill=tk.X, padx=20)
         
         # Título con texto más grande
         title_label = ttk.Label(
@@ -572,23 +603,23 @@ class PDFPreviewDialog(tk.Toplevel):
         # Número de subpartida con fondo amarillo
         subpartida_frame = ttk.Frame(text_frame)
         subpartida_frame.pack(pady=2, fill='x')
-        subpartida_label = tk.Label(  # Usar tk.Label en lugar de ttk.Label para poder cambiar el color
+        subpartida_label = tk.Label(
             subpartida_frame,
             text=f"Subpartida número: {self.numero_subpartida}",
             font=('Helvetica', 12),
-            bg='yellow',  # Fondo amarillo
-            fg='black'    # Texto negro
+            bg='yellow',
+            fg='black'
         )
         subpartida_label.pack()
         
         # Descripción con fondo blanco
-        descripcion_label = tk.Label(  # Usar tk.Label en lugar de ttk.Label para poder cambiar el color
+        descripcion_label = tk.Label(
             text_frame,
             text=f"Descripción de esta subpartida: {self.descripcion_subpartida}",
             font=('Helvetica', 12),
             bg='white',
             fg='black',
-            wraplength=800  # Para que el texto se ajuste si es muy largo
+            wraplength=800
         )
         descripcion_label.pack(pady=2)
         
@@ -601,13 +632,13 @@ class PDFPreviewDialog(tk.Toplevel):
         question_label.pack(pady=(10, 0))
         
         # Descriptions
-        desc_frame = ttk.LabelFrame(self, text="Descripciones encontradas")
+        desc_frame = ttk.LabelFrame(scrollable_frame, text="Descripciones encontradas")
         desc_frame.pack(fill=tk.X, padx=20, pady=10)
         for desc in descriptions:
             ttk.Label(desc_frame, text=desc, wraplength=800).pack(pady=5)
             
         # PDF Previews
-        preview_frame = ttk.Frame(self)
+        preview_frame = ttk.Frame(scrollable_frame)
         preview_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=2)
         
         # Create preview containers for each PDF
@@ -618,22 +649,51 @@ class PDFPreviewDialog(tk.Toplevel):
             self.preview_containers.append(container)
             preview_frame.grid_columnconfigure(i, weight=1)
             
-        # Buttons
-        btn_frame = ttk.Frame(self)
-        btn_frame.pack(pady=20)
+        # Buttons - colócalos en un frame separado al final del scrollable_frame
+        btn_frame = ttk.Frame(scrollable_frame)
+        btn_frame.pack(pady=20, fill=tk.X)
         
-        ttk.Button(
-            btn_frame,
+        # Centrar los botones
+        btn_center_frame = ttk.Frame(btn_frame)
+        btn_center_frame.pack(anchor="center")
+        
+        save_all_btn = ttk.Button(
+            btn_center_frame,
             text="Guardar todos", 
             command=lambda: self.finish_selection(pdfs)
-        ).pack(side=tk.LEFT, padx=10)
+        )
+        save_all_btn.pack(side=tk.LEFT, padx=10)
         
-        ttk.Button(
-            btn_frame,
+        save_selected_btn = ttk.Button(
+            btn_center_frame,
             text="Guardar seleccionados", 
             command=self.save_selected
-        ).pack(side=tk.LEFT, padx=10)
-                  
+        )
+        save_selected_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Hacer los botones más grandes y visibles
+        style = ttk.Style()
+        style.configure('TButton', font=('Helvetica', 12, 'bold'), padding=10)
+        
+        # Asegurarse de que los botones sean visibles (hacerlos más grandes)
+        save_all_btn.configure(style='TButton')
+        save_selected_btn.configure(style='TButton')
+        
+        # Agregar un botón de cierre explícito también
+        close_btn = ttk.Button(
+            btn_center_frame,
+            text="Cancelar",
+            command=self.on_close
+        )
+        close_btn.pack(side=tk.LEFT, padx=10)
+        close_btn.configure(style='TButton')
+        
+        # Habilitar el desplazamiento con la rueda del mouse
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
     def save_selected(self):
         # Verificar si no hay ningún archivo seleccionado
         self.selected_pdfs = [
@@ -670,7 +730,7 @@ class PDFPreviewContainer(ttk.Frame):
         self.is_selected = False
         self.current_page = 0
         self.total_pages = 0
-        self.zoom_factor = 1.2  # Inicializar el factor de zoom
+        self.zoom_factor = 0.6  # Inicializar el factor de zoom
         self.setup_preview()
 
     def setup_preview(self):
@@ -800,6 +860,7 @@ class PDFPreviewContainer(ttk.Frame):
 
 # Now let's modify the PreviewWindow class to handle automatic subpartida detection:
 class PreviewWindow:
+    print('abriendo la ventana de previsualizacion')
     def __init__(self, input_path, output_path, parent_window):
         self.root = tk.Toplevel()
         self.input_path = input_path
