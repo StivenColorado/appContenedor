@@ -1,7 +1,8 @@
 import pandas as pd
 import numpy as np
-import tkinter as tk  # Add this import
-import tkinter.ttk as ttk  # Change this import
+import tkinter as tk
+import tkinter.ttk as ttk
+from tkinter import simpledialog
 import os
 from tkinter import ttk, filedialog, messagebox
 from openpyxl import load_workbook, Workbook
@@ -439,10 +440,23 @@ def extract_and_save_images_from_workbook(workbook, temp_dir, header_row):
     
     return images_info
 
+def sanitize_filename(name):
+    """
+    Sanitize the brand name to be used in a filename by replacing invalid characters with underscores.
+    """
+    # Replace invalid filename characters with underscores
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        name = name.replace(char, '_')
+    return name.strip()
+
 def process_brand_excel(brand_df, output_path, marca, year, consolidado, images_info, start_row, zafiro_number):
     if 'ANOTACION' in brand_df.columns:
         brand_df = brand_df.drop('ANOTACION', axis=1)
-    filename = f"MARCA_{marca}_CONSO_{year}-{consolidado}.xlsx"
+    
+    # Sanitize the brand name for use in filename
+    safe_marca = sanitize_filename(marca)
+    filename = f"MARCA_{safe_marca}_CONSO_{year}-{consolidado}.xlsx"
     filepath = os.path.join(output_path, filename)
     
     wb = Workbook()
